@@ -1,0 +1,43 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+env/
+.venv/
+venv/
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+
+# Веса и артефакты моделей
+*.pt
+*.pth
+*.ckpt
+*.onnx
+*.index
+*.safetensors
+
+# Аудио
+*.wav
+*.mp3
+*.m4a
+*.ogg
+*.flac
+*.aiff
+!**/mute/**
+
+# Прочее
+*.zip
+*.log
+*.txt
+!requirements.txt
+*.ipynb_checkpoints
+**/.ipynb_checkpoints/
+.DS_Store
+Thumbs.db
+miniconda.sh
+miniconda.exe
+ffmpeg.exe
+ffprobe.exe
