@@ -784,7 +784,7 @@ class RMVPE:
         return f0
 
     def infer_from_audio_medfilt(
-        self, audio, thred=0.03, f0_min=50, f0_max=1100, window_size=3
+        self, audio, thred=0.03, f0_min=50, f0_max=2218, window_size=3
     ):
         f0 = self.infer_from_audio(audio, thred)
         f0[(f0 < f0_min) | (f0 > f0_max)] = 0

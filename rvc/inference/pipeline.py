@@ -136,8 +136,12 @@ class VC:
 
         f0 = np.multiply(f0, pow(2, pitch / 12))
         f0_mel = 1127 * np.log(1 + f0 / 700)
+        
+        # Расширенный диапазон для квантования: покрывает до C#7 (2218 Hz) после питч-шифта
+        extended_f0_mel_max = 1127 * np.log(1 + 2218 / 700)
+        
         f0_mel[f0_mel > 0] = (f0_mel[f0_mel > 0] - f0_mel_min) * 254 / (
-            f0_mel_max - f0_mel_min
+            extended_f0_mel_max - f0_mel_min
         ) + 1
         f0_mel[f0_mel <= 1] = 1
         f0_mel[f0_mel > 255] = 255
