@@ -53,8 +53,14 @@ def _inspect_model(model_file) -> str:
             ],
         )
 
-    lines = [f"Файл: {os.path.basename(path)} ({os.path.getsize(path) / 1024 / 1024:.1f} МБ)"]
-    lines.extend(f"{label}: {checkpoint[key]}" for key, label in MODEL_INFO_KEYS if key in checkpoint)
+    lines = [
+        f"Файл: {os.path.basename(path)} ({os.path.getsize(path) / 1024 / 1024:.1f} МБ)"
+    ]
+    lines.extend(
+        f"{label}: {checkpoint[key]}"
+        for key, label in MODEL_INFO_KEYS
+        if key in checkpoint
+    )
     weights = checkpoint.get("weight")
     if isinstance(weights, dict):
         lines.append(f"Слоёв: {len(weights)}")
@@ -76,7 +82,9 @@ def _split_checkpoint(checkpoint_file, output_dir) -> str:
         raise gr.Error(str(error)) from error
 
 
-def _upscale_audio(audio_file, overlap, progress=gr.Progress(track_tqdm=True)) -> gr.Audio:
+def _upscale_audio(
+    audio_file, overlap, progress=gr.Progress(track_tqdm=True)
+) -> gr.Audio:
     path = _uploaded_path(audio_file)
     if not path:
         raise gr.Error("Прикрепите аудиофайл.")
@@ -107,7 +115,9 @@ def _upscale_audio(audio_file, overlap, progress=gr.Progress(track_tqdm=True)) -
 
 def tools_tab():
     with gr.Accordion("Проверка модели (.pth)", open=False):
-        model_file = gr.File(label="Файл модели", file_types=[".pth"], file_count="single")
+        model_file = gr.File(
+            label="Файл модели", file_types=[".pth"], file_count="single"
+        )
         inspect_btn = gr.Button("Проверить", variant="primary")
         model_info = gr.Textbox(label="Сведения", lines=10, interactive=False)
         inspect_btn.click(_inspect_model, inputs=model_file, outputs=model_info)
@@ -115,17 +125,27 @@ def tools_tab():
     with gr.Accordion("Разделение чекпоинта (G / D)", open=False):
         gr.Markdown("Единый `checkpoint.pth` → `G_pretrain.pth` + `D_pretrain.pth`.")
         with gr.Row():
-            checkpoint_file = gr.File(label="Чекпоинт", file_types=[".pth"], file_count="single", scale=2)
+            checkpoint_file = gr.File(
+                label="Чекпоинт", file_types=[".pth"], file_count="single", scale=2
+            )
             split_dir = gr.Textbox(DEFAULT_SPLIT_DIR, label="Папка результата", scale=3)
         split_btn = gr.Button("Разделить", variant="primary")
         split_message = gr.Textbox(label="Результат", lines=4, interactive=False)
-        split_btn.click(_split_checkpoint, inputs=[checkpoint_file, split_dir], outputs=split_message)
+        split_btn.click(
+            _split_checkpoint,
+            inputs=[checkpoint_file, split_dir],
+            outputs=split_message,
+        )
 
     with gr.Accordion("Апскейл аудио (FlashSR)", open=False):
         with gr.Row():
             upscale_in = gr.Audio(label="Исходное аудио", type="filepath")
             upscale_out = gr.Audio(label="Улучшенное аудио", interactive=False)
         with gr.Row(equal_height=True):
-            overlap = gr.Slider(minimum=1, maximum=8, step=1, value=2, label="Перекрытие")
+            overlap = gr.Slider(
+                minimum=1, maximum=8, step=1, value=2, label="Перекрытие"
+            )
             upscale_btn = gr.Button("Улучшить", variant="primary")
-        upscale_btn.click(_upscale_audio, inputs=[upscale_in, overlap], outputs=upscale_out)
+        upscale_btn.click(
+            _upscale_audio, inputs=[upscale_in, overlap], outputs=upscale_out
+        )

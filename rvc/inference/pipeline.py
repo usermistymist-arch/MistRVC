@@ -8,7 +8,13 @@ import torch.nn.functional as F
 from scipy import signal
 from tqdm import tqdm
 
-from rvc._library.predictors.f0 import CREPEF0, FCPEF0, RMVPEF0, AutoTune, calc_pitch_shift
+from rvc._library.predictors.f0 import (
+    CREPEF0,
+    FCPEF0,
+    RMVPEF0,
+    AutoTune,
+    calc_pitch_shift,
+)
 
 # Фильтр Баттерворта для высоких частот
 bh, ah = signal.butter(N=5, Wn=48, btype="high", fs=16000)
@@ -24,14 +30,33 @@ class AudioProcessor:
         target_rate: int,
         rate: float,
     ):
-        rms1 = librosa.feature.rms(y=source_audio, frame_length=source_rate // 2 * 2, hop_length=source_rate // 2)
-        rms2 = librosa.feature.rms(y=target_audio, frame_length=target_rate // 2 * 2, hop_length=target_rate // 2)
+        rms1 = librosa.feature.rms(
+            y=source_audio,
+            frame_length=source_rate // 2 * 2,
+            hop_length=source_rate // 2,
+        )
+        rms2 = librosa.feature.rms(
+            y=target_audio,
+            frame_length=target_rate // 2 * 2,
+            hop_length=target_rate // 2,
+        )
 
-        rms1 = F.interpolate(torch.from_numpy(rms1).float().unsqueeze(0), size=target_audio.shape[0], mode="linear").squeeze()
-        rms2 = F.interpolate(torch.from_numpy(rms2).float().unsqueeze(0), size=target_audio.shape[0], mode="linear").squeeze()
+        rms1 = F.interpolate(
+            torch.from_numpy(rms1).float().unsqueeze(0),
+            size=target_audio.shape[0],
+            mode="linear",
+        ).squeeze()
+        rms2 = F.interpolate(
+            torch.from_numpy(rms2).float().unsqueeze(0),
+            size=target_audio.shape[0],
+            mode="linear",
+        ).squeeze()
         rms2 = torch.maximum(rms2, torch.zeros_like(rms2) + 1e-6)
 
-        adjusted_audio = target_audio * (torch.pow(rms1, 1 - rate) * torch.pow(rms2, rate - 1)).numpy()
+        adjusted_audio = (
+            target_audio
+            * (torch.pow(rms1, 1 - rate) * torch.pow(rms2, rate - 1)).numpy()
+        )
         return adjusted_audio
 
 
@@ -75,15 +100,25 @@ class VC:
         f0_mel_max = 1127 * np.log(1 + f0_max / 700)
 
         if f0_method in ("crepe", "crepe-tiny"):
-            model = CREPEF0(device=self.device, sample_rate=self.sample_rate, hop_size=self.window)
-            f0 = model.get_f0(audio, f0_min, f0_max, p_len, ("full" if f0_method == "crepe" else "tiny"))
+            model = CREPEF0(
+                device=self.device, sample_rate=self.sample_rate, hop_size=self.window
+            )
+            f0 = model.get_f0(
+                audio,
+                f0_min,
+                f0_max,
+                p_len,
+                ("full" if f0_method == "crepe" else "tiny"),
+            )
             del model
         elif f0_method in ("rmvpe", "rmvpe+", "hpa-rmvpe"):
             model = RMVPEF0(device=self.device, sample_rate=self.sample_rate)
             f0 = model.get_f0(audio, f0_min, f0_max, f0_method)
             del model
         elif f0_method == "fcpe":
-            model = FCPEF0(device=self.device, sample_rate=self.sample_rate, hop_size=self.window)
+            model = FCPEF0(
+                device=self.device, sample_rate=self.sample_rate, hop_size=self.window
+            )
             f0 = model.get_f0(audio, f0_min, f0_max, p_len)
             del model
 
@@ -101,7 +136,9 @@ class VC:
 
         f0 = np.multiply(f0, pow(2, pitch / 12))
         f0_mel = 1127 * np.log(1 + f0 / 700)
-        f0_mel[f0_mel > 0] = (f0_mel[f0_mel > 0] - f0_mel_min) * 254 / (f0_mel_max - f0_mel_min) + 1
+        f0_mel[f0_mel > 0] = (f0_mel[f0_mel > 0] - f0_mel_min) * 254 / (
+            f0_mel_max - f0_mel_min
+        ) + 1
         f0_mel[f0_mel <= 1] = 1
         f0_mel[f0_mel > 255] = 255
         f0_mel = np.rint(f0_mel).astype(np.int32)
@@ -147,11 +184,16 @@ class VC:
             weight = np.square(1 / score)
             weight /= weight.sum(axis=1, keepdims=True)
             npy = np.sum(big_npy[ix] * np.expand_dims(weight, axis=2), axis=1)
-            feats = torch.from_numpy(npy).unsqueeze(0).to(self.device) * index_rate + (1 - index_rate) * feats
+            feats = (
+                torch.from_numpy(npy).unsqueeze(0).to(self.device) * index_rate
+                + (1 - index_rate) * feats
+            )
 
         feats = F.interpolate(feats.permute(0, 2, 1), scale_factor=2).permute(0, 2, 1)
         if protect < 0.5:
-            feats0 = F.interpolate(feats0.permute(0, 2, 1), scale_factor=2).permute(0, 2, 1)
+            feats0 = F.interpolate(feats0.permute(0, 2, 1), scale_factor=2).permute(
+                0, 2, 1
+            )
 
         p_len = audio0.shape[0] // self.window
         if feats.shape[1] < p_len:
@@ -169,7 +211,12 @@ class VC:
 
         p_len = torch.tensor([p_len], device=self.device).long()
         with torch.no_grad():
-            audio1 = (net_g.infer(feats.float(), p_len, pitch, pitchf, sid)[0][0, 0]).data.cpu().float().numpy()
+            audio1 = (
+                (net_g.infer(feats.float(), p_len, pitch, pitchf, sid)[0][0, 0])
+                .data.cpu()
+                .float()
+                .numpy()
+            )
 
         if protect < 0.5:
             del feats0
@@ -259,8 +306,12 @@ class VC:
             t = t // self.window * self.window
 
             audio_segment = audio_pad[s : t + self.t_pad2 + self.window]
-            pitch_segment = pitch_tensor[:, s // self.window : (t + self.t_pad2) // self.window]
-            pitchf_segment = pitchf_tensor[:, s // self.window : (t + self.t_pad2) // self.window]
+            pitch_segment = pitch_tensor[
+                :, s // self.window : (t + self.t_pad2) // self.window
+            ]
+            pitchf_segment = pitchf_tensor[
+                :, s // self.window : (t + self.t_pad2) // self.window
+            ]
 
             audio_opt.append(
                 self.vc(
@@ -278,8 +329,12 @@ class VC:
             )
             s = t
 
-        pitch_segment = pitch_tensor[:, t // self.window :] if t is not None else pitch_tensor
-        pitchf_segment = pitchf_tensor[:, t // self.window :] if t is not None else pitchf_tensor
+        pitch_segment = (
+            pitch_tensor[:, t // self.window :] if t is not None else pitch_tensor
+        )
+        pitchf_segment = (
+            pitchf_tensor[:, t // self.window :] if t is not None else pitchf_tensor
+        )
 
         audio_opt.append(
             self.vc(
@@ -298,7 +353,9 @@ class VC:
 
         audio_opt = np.concatenate(audio_opt)
         if volume_envelope != 1:
-            audio_opt = AudioProcessor.change_rms(audio, self.sample_rate, audio_opt, self.tgt_sr, volume_envelope)
+            audio_opt = AudioProcessor.change_rms(
+                audio, self.sample_rate, audio_opt, self.tgt_sr, volume_envelope
+            )
 
         audio_max = np.abs(audio_opt).max() / 0.99
         if audio_max > 1:

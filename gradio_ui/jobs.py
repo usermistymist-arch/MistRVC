@@ -84,7 +84,9 @@ def request_stop() -> str:
 
     # Не считаем задачу остановленной лишь потому, что вышел родительский
     # Python-процесс: воркеры DataLoader могут пережить его и держать ОЗУ.
-    _kill_process_tree(proc, signal.SIGKILL if os.name != "nt" else signal.SIGTERM, process_group_id)
+    _kill_process_tree(
+        proc, signal.SIGKILL if os.name != "nt" else signal.SIGTERM, process_group_id
+    )
     try:
         proc.wait(timeout=5)
     except subprocess.TimeoutExpired:
@@ -103,7 +105,10 @@ def _release_inference_cache() -> None:
         return
     released = release_pipeline()
     if released:
-        print(f"[i] Модель '{released}' выгружена из памяти перед запуском задачи.", flush=True)
+        print(
+            f"[i] Модель '{released}' выгружена из памяти перед запуском задачи.",
+            flush=True,
+        )
 
 
 def _spawn(cmd: list) -> subprocess.Popen:
@@ -124,7 +129,9 @@ def _spawn(cmd: list) -> subprocess.Popen:
         _process = subprocess.Popen(cmd, **kwargs)  # noqa: S603 — команда собрана из констант
         _process_group_id = _process.pid if os.name != "nt" else None
         # Текстовая обёртка без трансляции \r: это живой прогресс tqdm, а не конец строки.
-        _process.stdout = io.TextIOWrapper(_process.stdout, encoding="utf-8", errors="replace", newline="")
+        _process.stdout = io.TextIOWrapper(
+            _process.stdout, encoding="utf-8", errors="replace", newline=""
+        )
         return _process
 
 
@@ -209,7 +216,9 @@ def run_job(title: str, commands: list, prefix: str = ""):
                 yield "\n".join(lines)
                 return
             if proc.returncode != 0:
-                lines.append(f"❌ Ошибка (код {proc.returncode}). Смотрите журнал выше.")
+                lines.append(
+                    f"❌ Ошибка (код {proc.returncode}). Смотрите журнал выше."
+                )
                 yield "\n".join(lines)
                 return
     finally:

@@ -15,7 +15,11 @@ import gradio as gr
 import requests
 
 from assets.env_paths import require_training_logs_dir, training_logs_dir
-from assets.model_installer import PRETRAINS_DIR, download_with_progress, ensure_pretrains
+from assets.model_installer import (
+    PRETRAINS_DIR,
+    download_with_progress,
+    ensure_pretrains,
+)
 from assets.notebook_check import colab_check, kaggle_check
 from assets.pretrains import NO_PRETRAIN, default_pretrain, pretrain_choices
 from gradio_ui.jobs import command, request_stop, run_job
@@ -26,7 +30,19 @@ DEFAULT_VOCODER = "HiFi-GAN"
 VOCODERS = ["HiFi-GAN", "MRF HiFi-GAN", "RefineGAN"]
 OPTIMIZERS = ["AdamW", "AdaBelief", "PolOpt"]
 F0_METHODS = ["rmvpe", "rmvpe+", "hpa-rmvpe"]
-AUDIO_EXTENSIONS = (".wav", ".mp3", ".flac", ".ogg", ".opus", ".m4a", ".aac", ".wma", ".aiff", ".webm", ".mp4")
+AUDIO_EXTENSIONS = (
+    ".wav",
+    ".mp3",
+    ".flac",
+    ".ogg",
+    ".opus",
+    ".m4a",
+    ".aac",
+    ".wma",
+    ".aiff",
+    ".webm",
+    ".mp4",
+)
 
 
 def _section_hint(code1: str, code2: str):
@@ -118,7 +134,11 @@ def _open_board(port, base_url):
     # тогда подставляется явно указанный базовый адрес.
     if base_url and base_url.strip():
         query = url.split("?", 1)[1] if "?" in url else ""
-        url = f"{base_url.strip().rstrip('/')}/?{query}" if query else base_url.strip().rstrip("/")
+        url = (
+            f"{base_url.strip().rstrip('/')}/?{query}"
+            if query
+            else base_url.strip().rstrip("/")
+        )
     return f'<iframe src="{url}" width="100%" height="780" frameborder="0" title="TensorBoard"></iframe>'
 
 
@@ -133,8 +153,14 @@ def _input_root(model_name: str, files, folder: str) -> str:
         os.makedirs(dataset_dir, exist_ok=True)
         copied = 0
         for item in files:
-            path = getattr(item, "name", None) or (item if isinstance(item, str) else None)
-            if path and os.path.isfile(path) and path.lower().endswith(AUDIO_EXTENSIONS):
+            path = getattr(item, "name", None) or (
+                item if isinstance(item, str) else None
+            )
+            if (
+                path
+                and os.path.isfile(path)
+                and path.lower().endswith(AUDIO_EXTENSIONS)
+            ):
                 shutil.copyfile(path, os.path.join(dataset_dir, os.path.basename(path)))
                 copied += 1
         if not copied:
@@ -190,7 +216,9 @@ def _train_index(model_name):
     )
 
 
-def _check_config(model_name: str, exp_dir: str, vocoder: str, sample_rate: int) -> None:
+def _check_config(
+    model_name: str, exp_dir: str, vocoder: str, sample_rate: int
+) -> None:
     """Сверяет вокодер и частоту с уже созданной конфигурацией модели.
 
     `data/config.json` пишется один раз при первом запуске обучения, поэтому
@@ -248,7 +276,9 @@ def _prepare_manual_pretrain(kind: str, value: str):
             raise gr.Error(f"Не удалось скачать претрейн {kind}: {error}") from error
         return local_path
     if not os.path.isfile(value):
-        raise gr.Error(f"Претрейн не найден: {value} — укажите существующий файл или прямую ссылку на него.")
+        raise gr.Error(
+            f"Претрейн не найден: {value} — укажите существующий файл или прямую ссылку на него."
+        )
     return value
 
 
@@ -313,7 +343,9 @@ def _train_model(
     logs_dir = _require_logs_dir()
     exp_dir = _exp_dir(model_name)
     if not os.path.isfile(os.path.join(exp_dir, "data", "filelist.txt")):
-        raise gr.Error("Нет filelist.txt — сначала выполните нарезку и извлечение признаков.")
+        raise gr.Error(
+            "Нет filelist.txt — сначала выполните нарезку и извлечение признаков."
+        )
     _check_config(model_name, exp_dir, vocoder, int(sample_rate))
     cmd = command(
         "rvc.training.train",
@@ -342,7 +374,9 @@ def _train_model(
     )
 
     notes, (resolved_g, resolved_d) = yield from _drain(
-        _resolve_pretrains(pretrain, pretrain_g, pretrain_d, vocoder, int(sample_rate), exp_dir),
+        _resolve_pretrains(
+            pretrain, pretrain_g, pretrain_d, vocoder, int(sample_rate), exp_dir
+        ),
     )
     if resolved_g and resolved_d:
         cmd += ["--pretrain_g", resolved_g, "--pretrain_d", resolved_d]
@@ -352,29 +386,55 @@ def _train_model(
 def training_tab():
     model_name = gr.Textbox(label="Имя модели", placeholder="MyVoice")
 
-    with gr.Accordion("Подготовка данных", open=False), gr.Group(), gr.Row(equal_height=True):
+    with (
+        gr.Accordion("Подготовка данных", open=False),
+        gr.Group(),
+        gr.Row(equal_height=True),
+    ):
         with gr.Column(scale=1):
-            dataset_folder = gr.Textbox(label="Папка с датасетом", placeholder="/путь/к/аудио")
-            dataset_files = gr.File(label="…или загрузите файлы", file_count="multiple", height=260)
+            dataset_folder = gr.Textbox(
+                label="Папка с датасетом", placeholder="/путь/к/аудио"
+            )
+            dataset_files = gr.File(
+                label="…или загрузите файлы", file_count="multiple", height=260
+            )
         with gr.Column(scale=1):
             with gr.Row(equal_height=True):
-                sample_rate = gr.Dropdown(SAMPLE_RATES, value=48000, label="Частота (Hz)")
+                sample_rate = gr.Dropdown(
+                    SAMPLE_RATES, value=48000, label="Частота (Hz)"
+                )
                 f0_method = gr.Dropdown(F0_METHODS, value="rmvpe", label="Метод F0")
                 normalize = gr.Checkbox(value=True, label="Нормализация")
             with gr.Row(equal_height=True):
-                segment_len = gr.Slider(minimum=1.0, maximum=10.0, step=0.1, value=3.0, label="Сегмент (сек)")
-                include_mutes = gr.Slider(minimum=0, maximum=10, step=1, value=2, label="Мьют-файлов")
+                segment_len = gr.Slider(
+                    minimum=1.0,
+                    maximum=10.0,
+                    step=0.1,
+                    value=3.0,
+                    label="Сегмент (сек)",
+                )
+                include_mutes = gr.Slider(
+                    minimum=0, maximum=10, step=1, value=2, label="Мьют-файлов"
+                )
             with gr.Row(equal_height=True):
                 slice_btn = gr.Button("1. Нарезать", variant="primary")
-                extract_btn = gr.Button("2. Извлечь", variant="primary", interactive=False)
+                extract_btn = gr.Button(
+                    "2. Извлечь", variant="primary", interactive=False
+                )
                 index_btn = gr.Button("3. Построить индекс", interactive=False)
 
     with gr.Group():
         _section_hint("checkpoint.pth", "tensorboard --logdir logs")
         with gr.Row(equal_height=True):
-            total_epoch = gr.Slider(minimum=1, maximum=10000, step=1, value=300, label="Всего эпох")
-            save_every_epoch = gr.Slider(minimum=1, maximum=100, step=1, value=25, label="Сохранять каждые N")
-            batch_size = gr.Slider(minimum=1, maximum=128, step=1, value=8, label="Батч")
+            total_epoch = gr.Slider(
+                minimum=1, maximum=10000, step=1, value=300, label="Всего эпох"
+            )
+            save_every_epoch = gr.Slider(
+                minimum=1, maximum=100, step=1, value=25, label="Сохранять каждые N"
+            )
+            batch_size = gr.Slider(
+                minimum=1, maximum=128, step=1, value=8, label="Батч"
+            )
         with gr.Accordion("Дополнительно", open=False):
             with gr.Row(equal_height=True):
                 vocoder = gr.Dropdown(VOCODERS, value=DEFAULT_VOCODER, label="Вокодер")
@@ -387,8 +447,16 @@ def training_tab():
                     label="Претрейн",
                     scale=1,
                 )
-                pretrain_g = gr.Textbox(label="Свой претрейн G", placeholder="Путь или URL к .pth — вместо встроенного", scale=2)
-                pretrain_d = gr.Textbox(label="Свой претрейн D", placeholder="Путь или URL к .pth — вместо встроенного", scale=2)
+                pretrain_g = gr.Textbox(
+                    label="Свой претрейн G",
+                    placeholder="Путь или URL к .pth — вместо встроенного",
+                    scale=2,
+                )
+                pretrain_d = gr.Textbox(
+                    label="Свой претрейн D",
+                    placeholder="Путь или URL к .pth — вместо встроенного",
+                    scale=2,
+                )
             with gr.Row(equal_height=True):
                 save_to_zip = gr.Checkbox(False, label="Собрать ZIP в конце")
                 save_half = gr.Checkbox(True, label="Веса float16")
@@ -400,8 +468,13 @@ def training_tab():
     with gr.Group():
         log = gr.Textbox(label="Журнал", lines=12, max_lines=12)
         board_btn = gr.Button("📊 TensorBoard", variant="secondary")
-        with gr.Accordion("Параметры TensorBoard", open=False), gr.Row(equal_height=True):
-            board_port = gr.Number(value=DEFAULT_TENSORBOARD_PORT, label="Порт", precision=0)
+        with (
+            gr.Accordion("Параметры TensorBoard", open=False),
+            gr.Row(equal_height=True),
+        ):
+            board_port = gr.Number(
+                value=DEFAULT_TENSORBOARD_PORT, label="Порт", precision=0
+            )
             board_base_url = gr.Textbox(
                 label="Базовый адрес (за прокси)",
                 placeholder="http://127.0.0.1:6006/tensorboard",
@@ -410,13 +483,27 @@ def training_tab():
         board_frame = gr.HTML("")
 
     step_buttons = [slice_btn, extract_btn, index_btn]
-    model_name.change(_step_states, inputs=model_name, outputs=step_buttons, api_name=False)
+    model_name.change(
+        _step_states, inputs=model_name, outputs=step_buttons, api_name=False
+    )
     # Список претрейнов зависит и от вокодера, и от частоты.
     for trigger in (vocoder, sample_rate):
-        trigger.change(_refresh_pretrains, inputs=[vocoder, sample_rate, pretrain], outputs=pretrain, api_name=False)
+        trigger.change(
+            _refresh_pretrains,
+            inputs=[vocoder, sample_rate, pretrain],
+            outputs=pretrain,
+            api_name=False,
+        )
     slice_btn.click(
         _slice_dataset,
-        inputs=[model_name, dataset_files, dataset_folder, sample_rate, segment_len, normalize],
+        inputs=[
+            model_name,
+            dataset_files,
+            dataset_folder,
+            sample_rate,
+            segment_len,
+            normalize,
+        ],
         outputs=log,
     ).then(_step_states, inputs=model_name, outputs=step_buttons, api_name=False)
     extract_btn.click(
@@ -449,5 +536,7 @@ def training_tab():
         outputs=step_buttons,
         api_name=False,
     )
-    board_btn.click(_open_board, inputs=[board_port, board_base_url], outputs=board_frame)
+    board_btn.click(
+        _open_board, inputs=[board_port, board_base_url], outputs=board_frame
+    )
     stop_btn.click(request_stop, outputs=stop_status, queue=False, api_name=False)

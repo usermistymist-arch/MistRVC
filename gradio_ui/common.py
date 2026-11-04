@@ -18,7 +18,25 @@ UVR_OUTPUT_DIR = os.path.join(PROJECT_ROOT, "output", "UVR_output")
 OUTPUT_FORMATS = ["wav", "flac", "mp3", "ogg", "m4a"]
 F0_METHODS = ["hpa-rmvpe", "rmvpe+", "rmvpe", "fcpe", "crepe", "crepe-tiny"]
 
-AUTOTUNE_NOTES = ["C", "C#", "Db", "D", "D#", "Eb", "E", "F", "F#", "Gb", "G", "G#", "Ab", "A", "A#", "Bb", "B"]
+AUTOTUNE_NOTES = [
+    "C",
+    "C#",
+    "Db",
+    "D",
+    "D#",
+    "Eb",
+    "E",
+    "F",
+    "F#",
+    "Gb",
+    "G",
+    "G#",
+    "Ab",
+    "A",
+    "A#",
+    "Bb",
+    "B",
+]
 AUTOTUNE_SCALES = [
     "chromatic",
     "major",
@@ -74,7 +92,10 @@ EDGE_VOICES = {
 
 
 def natural_key(text: str):
-    return [int(part) if part.isdigit() else part.lower() for part in re.split(r"(\d+)", text)]
+    return [
+        int(part) if part.isdigit() else part.lower()
+        for part in re.split(r"(\d+)", text)
+    ]
 
 
 def list_rvc_models() -> list:
@@ -82,7 +103,11 @@ def list_rvc_models() -> list:
     if not os.path.isdir(RVC_MODELS_DIR):
         return []
     return sorted(
-        (name for name in os.listdir(RVC_MODELS_DIR) if os.path.isdir(os.path.join(RVC_MODELS_DIR, name))),
+        (
+            name
+            for name in os.listdir(RVC_MODELS_DIR)
+            if os.path.isdir(os.path.join(RVC_MODELS_DIR, name))
+        ),
         key=natural_key,
     )
 
@@ -114,7 +139,9 @@ def model_select() -> gr.Dropdown:
 def pitch_group():
     """Группа тона: авто-тон + порог + слайдер (классический вид)."""
     with gr.Group():
-        autopitch = gr.Checkbox(value=False, label="Автоматическое определение высоты тона")
+        autopitch = gr.Checkbox(
+            value=False, label="Автоматическое определение высоты тона"
+        )
         autopitch_threshold = gr.Radio(
             value=155.0,
             choices=[("Мужская модель", 155.0), ("Женская модель", 255.0)],
@@ -129,7 +156,12 @@ def pitch_group():
             label="Регулировка высоты тона",
             info="-24 — Мужская модель | 24 — Женская модель",
         )
-    autopitch.change(_toggle_autopitch, inputs=autopitch, outputs=[autopitch_threshold, rvc_pitch], api_name=False)
+    autopitch.change(
+        _toggle_autopitch,
+        inputs=autopitch,
+        outputs=[autopitch_threshold, rvc_pitch],
+        api_name=False,
+    )
     return autopitch, autopitch_threshold, rvc_pitch
 
 
@@ -162,7 +194,11 @@ def _toggle_autopitch(enabled: bool):
 
 
 def _toggle_autotune(enabled: bool):
-    return gr.update(visible=enabled), gr.update(visible=enabled), gr.update(visible=enabled)
+    return (
+        gr.update(visible=enabled),
+        gr.update(visible=enabled),
+        gr.update(visible=enabled),
+    )
 
 
 def conversion_settings():

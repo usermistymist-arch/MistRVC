@@ -126,7 +126,9 @@ class TextAudioLoaderMultiNSFsid(torch.utils.data.Dataset):
         """
         audio, sample_rate = load_wav_to_torch(filename)
         if sample_rate != self.sample_rate:
-            raise ValueError(f"{sample_rate} SR doesn't match target {self.sample_rate} SR")
+            raise ValueError(
+                f"{sample_rate} SR doesn't match target {self.sample_rate} SR"
+            )
         audio_norm = audio
         audio_norm = audio_norm.unsqueeze(0)
         spec = spectrogram_torch(
@@ -171,7 +173,9 @@ class TextAudioCollateMultiNSFsid:
             batch (list): List of data samples.
 
         """
-        _, ids_sorted_decreasing = torch.sort(torch.LongTensor([x[0].size(1) for x in batch]), dim=0, descending=True)
+        _, ids_sorted_decreasing = torch.sort(
+            torch.LongTensor([x[0].size(1) for x in batch]), dim=0, descending=True
+        )
 
         max_spec_len = max([x[0].size(1) for x in batch])
         max_wave_len = max([x[1].size(1) for x in batch])
@@ -184,7 +188,9 @@ class TextAudioCollateMultiNSFsid:
 
         max_phone_len = max([x[2].size(0) for x in batch])
         phone_lengths = torch.LongTensor(len(batch))
-        phone_padded = torch.FloatTensor(len(batch), max_phone_len, batch[0][2].shape[1])
+        phone_padded = torch.FloatTensor(
+            len(batch), max_phone_len, batch[0][2].shape[1]
+        )
         pitch_padded = torch.LongTensor(len(batch), max_phone_len)
         pitchf_padded = torch.FloatTensor(len(batch), max_phone_len)
         phone_padded.zero_()
@@ -276,7 +282,9 @@ class DistributedBucketSampler(torch.utils.data.distributed.DistributedSampler):
         for i in range(len(buckets)):
             len_bucket = len(buckets[i])
             total_batch_size = self.num_replicas * self.batch_size
-            rem = (total_batch_size - (len_bucket % total_batch_size)) % total_batch_size
+            rem = (
+                total_batch_size - (len_bucket % total_batch_size)
+            ) % total_batch_size
             num_samples_per_bucket.append(len_bucket + rem)
         return buckets, num_samples_per_bucket
 
@@ -301,13 +309,22 @@ class DistributedBucketSampler(torch.utils.data.distributed.DistributedSampler):
             num_samples_bucket = self.num_samples_per_bucket[i]
 
             rem = num_samples_bucket - len_bucket
-            ids_bucket = ids_bucket + ids_bucket * (rem // len_bucket) + ids_bucket[: (rem % len_bucket)]
+            ids_bucket = (
+                ids_bucket
+                + ids_bucket * (rem // len_bucket)
+                + ids_bucket[: (rem % len_bucket)]
+            )
 
             ids_bucket = ids_bucket[self.rank :: self.num_replicas]
 
             # batching
             for j in range(len(ids_bucket) // self.batch_size):
-                batch = [bucket[idx] for idx in ids_bucket[j * self.batch_size : (j + 1) * self.batch_size]]
+                batch = [
+                    bucket[idx]
+                    for idx in ids_bucket[
+                        j * self.batch_size : (j + 1) * self.batch_size
+                    ]
+                ]
                 batches.append(batch)
 
         if self.shuffle:

@@ -68,7 +68,9 @@ class ConvBlockRes(nn.Module):
 
 
 class ResEncoderBlock(nn.Module):
-    def __init__(self, in_channels, out_channels, kernel_size, n_blocks=1, momentum=0.01):
+    def __init__(
+        self, in_channels, out_channels, kernel_size, n_blocks=1, momentum=0.01
+    ):
         super().__init__()
         self.n_blocks = n_blocks
         self.conv = nn.ModuleList()
@@ -104,7 +106,11 @@ class Encoder(nn.Module):
         self.layers = nn.ModuleList()
         self.latent_channels = []
         for _ in range(self.n_encoders):
-            self.layers.append(ResEncoderBlock(in_channels, out_channels, kernel_size, n_blocks, momentum=momentum))
+            self.layers.append(
+                ResEncoderBlock(
+                    in_channels, out_channels, kernel_size, n_blocks, momentum=momentum
+                )
+            )
             self.latent_channels.append([out_channels, in_size])
             in_channels = out_channels
             out_channels *= 2
@@ -126,9 +132,13 @@ class Intermediate(nn.Module):
         super().__init__()
         self.n_inters = n_inters
         self.layers = nn.ModuleList()
-        self.layers.append(ResEncoderBlock(in_channels, out_channels, None, n_blocks, momentum))
+        self.layers.append(
+            ResEncoderBlock(in_channels, out_channels, None, n_blocks, momentum)
+        )
         for _ in range(self.n_inters - 1):
-            self.layers.append(ResEncoderBlock(out_channels, out_channels, None, n_blocks, momentum))
+            self.layers.append(
+                ResEncoderBlock(out_channels, out_channels, None, n_blocks, momentum)
+            )
 
     def forward(self, x):
         for i in range(self.n_inters):
@@ -174,7 +184,9 @@ class Decoder(nn.Module):
         self.n_decoders = n_decoders
         for _ in range(self.n_decoders):
             out_channels = in_channels // 2
-            self.layers.append(ResDecoderBlock(in_channels, out_channels, stride, n_blocks, momentum))
+            self.layers.append(
+                ResDecoderBlock(in_channels, out_channels, stride, n_blocks, momentum)
+            )
             in_channels = out_channels
 
     def forward(self, x, concat_tensors):
@@ -194,14 +206,18 @@ class DeepUnet(nn.Module):
         en_out_channels=16,
     ):
         super().__init__()
-        self.encoder = Encoder(in_channels, 128, en_de_layers, kernel_size, n_blocks, en_out_channels)
+        self.encoder = Encoder(
+            in_channels, 128, en_de_layers, kernel_size, n_blocks, en_out_channels
+        )
         self.intermediate = Intermediate(
             self.encoder.out_channel // 2,
             self.encoder.out_channel,
             inter_layers,
             n_blocks,
         )
-        self.decoder = Decoder(self.encoder.out_channel, en_de_layers, kernel_size, n_blocks)
+        self.decoder = Decoder(
+            self.encoder.out_channel, en_de_layers, kernel_size, n_blocks
+        )
 
     def forward(self, x):
         x, concat_tensors = self.encoder(x)
@@ -244,7 +260,11 @@ class DS_Bottleneck(nn.Module):
         self.shortcut = shortcut and c1 == c2
 
     def forward(self, x):
-        return x + self.dsconv2(self.dsconv1(x)) if self.shortcut else self.dsconv2(self.dsconv1(x))
+        return (
+            x + self.dsconv2(self.dsconv1(x))
+            if self.shortcut
+            else self.dsconv2(self.dsconv1(x))
+        )
 
 
 class DS_C3k(nn.Module):
@@ -253,7 +273,12 @@ class DS_C3k(nn.Module):
         self.cv1 = Conv(c1, int(c2 * e), 1, 1)
         self.cv2 = Conv(c1, int(c2 * e), 1, 1)
         self.cv3 = Conv(2 * int(c2 * e), c2, 1, 1)
-        self.m = nn.Sequential(*[DS_Bottleneck(int(c2 * e), int(c2 * e), k=k, shortcut=True) for _ in range(n)])
+        self.m = nn.Sequential(
+            *[
+                DS_Bottleneck(int(c2 * e), int(c2 * e), k=k, shortcut=True)
+                for _ in range(n)
+            ]
+        )
 
     def forward(self, x):
         return self.cv3(torch.cat((self.m(self.cv1(x)), self.cv2(x)), dim=1))
@@ -277,7 +302,9 @@ class AdaptiveHyperedgeGeneration(nn.Module):
         self.num_heads = num_heads
         self.head_dim = max(1, in_channels // num_heads)
         self.global_proto = nn.Parameter(torch.randn(num_hyperedges, in_channels))
-        self.context_mapper = nn.Linear(2 * in_channels, num_hyperedges * in_channels, bias=False)
+        self.context_mapper = nn.Linear(
+            2 * in_channels, num_hyperedges * in_channels, bias=False
+        )
         self.query_proj = nn.Linear(in_channels, in_channels, bias=False)
         self.scale = self.head_dim**-0.5
 
@@ -286,10 +313,18 @@ class AdaptiveHyperedgeGeneration(nn.Module):
         avg_pool = F.adaptive_avg_pool1d(x.permute(0, 2, 1), 1).squeeze(-1)
         max_pool = F.adaptive_max_pool1d(x.permute(0, 2, 1), 1).squeeze(-1)
         context = torch.cat((avg_pool, max_pool), dim=1)
-        P = self.global_proto.unsqueeze(0) + self.context_mapper(context).view(B, self.num_hyperedges, C)
+        P = self.global_proto.unsqueeze(0) + self.context_mapper(context).view(
+            B, self.num_hyperedges, C
+        )
 
-        Q = self.query_proj(x).view(B, N, self.num_heads, self.head_dim).permute(0, 2, 1, 3)
-        K = P.view(B, self.num_hyperedges, self.num_heads, self.head_dim).permute(0, 2, 3, 1)
+        Q = (
+            self.query_proj(x)
+            .view(B, N, self.num_heads, self.head_dim)
+            .permute(0, 2, 1, 3)
+        )
+        K = P.view(B, self.num_hyperedges, self.num_heads, self.head_dim).permute(
+            0, 2, 3, 1
+        )
         attn = ((Q @ K) * self.scale).mean(dim=1).permute(0, 2, 1)
         return F.softmax(attn, dim=-1)
 
@@ -302,13 +337,17 @@ class HypergraphConvolution(nn.Module):
         self.act = nn.SiLU()
 
     def forward(self, x, A):
-        return x + self.act(self.W_v(A.transpose(1, 2).bmm(self.act(self.W_e(A.bmm(x))))))
+        return x + self.act(
+            self.W_v(A.transpose(1, 2).bmm(self.act(self.W_e(A.bmm(x)))))
+        )
 
 
 class AdaptiveHypergraphComputation(nn.Module):
     def __init__(self, in_channels, out_channels, num_hyperedges, num_heads):
         super().__init__()
-        self.adaptive_hyperedge_gen = AdaptiveHyperedgeGeneration(in_channels, num_hyperedges, num_heads)
+        self.adaptive_hyperedge_gen = AdaptiveHyperedgeGeneration(
+            in_channels, num_hyperedges, num_heads
+        )
         self.hypergraph_conv = HypergraphConvolution(in_channels, out_channels)
 
     def forward(self, x):
@@ -324,7 +363,9 @@ class C3AH(nn.Module):
         super().__init__()
         self.cv1 = Conv(c1, int(c1 * e), 1, 1)
         self.cv2 = Conv(c1, int(c1 * e), 1, 1)
-        self.ahc = AdaptiveHypergraphComputation(int(c1 * e), int(c1 * e), num_hyperedges, num_heads)
+        self.ahc = AdaptiveHypergraphComputation(
+            int(c1 * e), int(c1 * e), num_hyperedges, num_heads
+        )
         self.cv3 = Conv(2 * int(c1 * e), c2, 1, 1)
 
     def forward(self, x):
@@ -332,7 +373,17 @@ class C3AH(nn.Module):
 
 
 class HyperACE(nn.Module):
-    def __init__(self, in_channels, out_channels, num_hyperedges=16, num_heads=8, k=2, l=1, c_h=0.5, c_l=0.25):
+    def __init__(
+        self,
+        in_channels,
+        out_channels,
+        num_hyperedges=16,
+        num_heads=8,
+        k=2,
+        l=1,
+        c_h=0.5,
+        c_l=0.25,
+    ):
         super().__init__()
         c2, c3, c4, c5 = in_channels
         c_mid = c4
@@ -341,10 +392,21 @@ class HyperACE(nn.Module):
         self.c_l = int(c_mid * c_l)
         self.c_s = c_mid - self.c_h - self.c_l
         self.high_order_branch = nn.ModuleList(
-            [C3AH(self.c_h, self.c_h, num_hyperedges=num_hyperedges, num_heads=num_heads, e=1.0) for _ in range(k)],
+            [
+                C3AH(
+                    self.c_h,
+                    self.c_h,
+                    num_hyperedges=num_hyperedges,
+                    num_heads=num_heads,
+                    e=1.0,
+                )
+                for _ in range(k)
+            ],
         )
         self.high_order_fuse = Conv(self.c_h * k, self.c_h, 1, 1)
-        self.low_order_branch = nn.Sequential(*[DS_C3k(self.c_l, self.c_l, n=1, k=3, e=1.0) for _ in range(l)])
+        self.low_order_branch = nn.Sequential(
+            *[DS_C3k(self.c_l, self.c_l, n=1, k=3, e=1.0) for _ in range(l)]
+        )
         self.final_fuse = Conv(self.c_h + self.c_l + self.c_s, out_channels, 1, 1)
 
     def forward(self, x):
@@ -361,9 +423,13 @@ class HyperACE(nn.Module):
             dim=1,
         )
 
-        x_h, x_l, x_s = self.fuse_conv(fused).split([self.c_h, self.c_l, self.c_s], dim=1)
+        x_h, x_l, x_s = self.fuse_conv(fused).split(
+            [self.c_h, self.c_l, self.c_s], dim=1
+        )
 
-        high_out = self.high_order_fuse(torch.cat([m(x_h) for m in self.high_order_branch], dim=1))
+        high_out = self.high_order_fuse(
+            torch.cat([m(x_h) for m in self.high_order_branch], dim=1)
+        )
         low_out = self.low_order_branch(x_l)
 
         return self.final_fuse(torch.cat((high_out, low_out, x_s), dim=1))
@@ -403,7 +469,12 @@ class YOLO13Encoder(nn.Module):
             DS_C3k2(base_channels * 16, base_channels * 16, n=1),
         )
 
-        self.out_channels = [base_channels * 2, base_channels * 4, base_channels * 8, base_channels * 16]
+        self.out_channels = [
+            base_channels * 2,
+            base_channels * 4,
+            base_channels * 8,
+            base_channels * 16,
+        ]
 
     def forward(self, x):
         x = self.stem(x)
@@ -446,19 +517,47 @@ class YOLO13FullPADDecoder(nn.Module):
         p2, p3, p4, p5 = enc_feats
 
         d5 = self.skip_p5(p5)
-        h5 = self.h_to_d5(F.interpolate(h_ace, size=d5.shape[2:], mode="bilinear", align_corners=False))
+        h5 = self.h_to_d5(
+            F.interpolate(
+                h_ace, size=d5.shape[2:], mode="bilinear", align_corners=False
+            )
+        )
         d5_fused = self.fusion_d5(d5, h5)
 
-        d4 = self.up_d5(F.interpolate(d5_fused, size=p4.shape[2:], mode="bilinear", align_corners=False)) + self.skip_p4(p4)
-        h4 = self.h_to_d4(F.interpolate(h_ace, size=d4.shape[2:], mode="bilinear", align_corners=False))
+        d4 = self.up_d5(
+            F.interpolate(
+                d5_fused, size=p4.shape[2:], mode="bilinear", align_corners=False
+            )
+        ) + self.skip_p4(p4)
+        h4 = self.h_to_d4(
+            F.interpolate(
+                h_ace, size=d4.shape[2:], mode="bilinear", align_corners=False
+            )
+        )
         d4_fused = self.fusion_d4(d4, h4)
 
-        d3 = self.up_d4(F.interpolate(d4_fused, size=p3.shape[2:], mode="bilinear", align_corners=False)) + self.skip_p3(p3)
-        h3 = self.h_to_d3(F.interpolate(h_ace, size=d3.shape[2:], mode="bilinear", align_corners=False))
+        d3 = self.up_d4(
+            F.interpolate(
+                d4_fused, size=p3.shape[2:], mode="bilinear", align_corners=False
+            )
+        ) + self.skip_p3(p3)
+        h3 = self.h_to_d3(
+            F.interpolate(
+                h_ace, size=d3.shape[2:], mode="bilinear", align_corners=False
+            )
+        )
         d3_fused = self.fusion_d3(d3, h3)
 
-        d2 = self.up_d3(F.interpolate(d3_fused, size=p2.shape[2:], mode="bilinear", align_corners=False)) + self.skip_p2(p2)
-        h2 = self.h_to_d2(F.interpolate(h_ace, size=d2.shape[2:], mode="bilinear", align_corners=False))
+        d2 = self.up_d3(
+            F.interpolate(
+                d3_fused, size=p2.shape[2:], mode="bilinear", align_corners=False
+            )
+        ) + self.skip_p2(p2)
+        h2 = self.h_to_d2(
+            F.interpolate(
+                h_ace, size=d2.shape[2:], mode="bilinear", align_corners=False
+            )
+        )
         d2_fused = self.fusion_d2(d2, h2)
 
         return self.final_conv(self.final_d2(d2_fused))
@@ -498,7 +597,9 @@ class HPADeepUnet(nn.Module):
         features = self.encoder(x)
         h_ace = self.hyperace(features)
         out = self.decoder(features, h_ace)
-        return F.interpolate(out, size=x.shape[2:], mode="bilinear", align_corners=False)
+        return F.interpolate(
+            out, size=x.shape[2:], mode="bilinear", align_corners=False
+        )
 
 
 # ==================== E2E Model ====================
@@ -540,9 +641,16 @@ class E2E(nn.Module):
         self.cnn = nn.Conv2d(en_out_channels, 3, (3, 3), padding=(1, 1))
 
         if n_gru:
-            self.fc = nn.Sequential(BiGRU(3 * 128, 256, n_gru), nn.Linear(512, N_CLASS), nn.Dropout(0.25), nn.Sigmoid())
+            self.fc = nn.Sequential(
+                BiGRU(3 * 128, 256, n_gru),
+                nn.Linear(512, N_CLASS),
+                nn.Dropout(0.25),
+                nn.Sigmoid(),
+            )
         else:
-            self.fc = nn.Sequential(nn.Linear(3 * N_MELS, N_CLASS), nn.Dropout(0.25), nn.Sigmoid())
+            self.fc = nn.Sequential(
+                nn.Linear(3 * N_MELS, N_CLASS), nn.Dropout(0.25), nn.Sigmoid()
+            )
 
     def forward(self, mel):
         mel = mel.transpose(-1, -2).unsqueeze(1)
@@ -593,7 +701,9 @@ class MelSpectrogram(torch.nn.Module):
         hop_length_new = int(np.round(self.hop_length * speed))
         keyshift_key = str(keyshift) + "_" + str(audio.device)
         if keyshift_key not in self.hann_window:
-            self.hann_window[keyshift_key] = torch.hann_window(win_length_new).to(audio.device)
+            self.hann_window[keyshift_key] = torch.hann_window(win_length_new).to(
+                audio.device
+            )
         fft = torch.stft(
             audio,
             n_fft=n_fft_new,
@@ -631,14 +741,18 @@ class RMVPE:
         model.eval()
         self.model = model.to(device)
 
-        self.mel_extractor = MelSpectrogram(N_MELS, 16000, 1024, 160, None, 30, 8000).to(device)
+        self.mel_extractor = MelSpectrogram(
+            N_MELS, 16000, 1024, 160, None, 30, 8000
+        ).to(device)
         cents_mapping = 20 * np.arange(N_CLASS) + 1997.3794084376191
         self.cents_mapping = np.pad(cents_mapping, (4, 4))
 
     def mel2hidden(self, mel, chunk_size=32000):
         with torch.no_grad():
             n_frames = mel.shape[-1]
-            mel = F.pad(mel, (0, 32 * ((n_frames - 1) // 32 + 1) - n_frames), mode="reflect")
+            mel = F.pad(
+                mel, (0, 32 * ((n_frames - 1) // 32 + 1) - n_frames), mode="reflect"
+            )
 
             if self.hpa:
                 output_chunks = []
@@ -669,7 +783,9 @@ class RMVPE:
         f0 = self.decode(hidden, thred=thred)
         return f0
 
-    def infer_from_audio_medfilt(self, audio, thred=0.03, f0_min=50, f0_max=1100, window_size=3):
+    def infer_from_audio_medfilt(
+        self, audio, thred=0.03, f0_min=50, f0_max=1100, window_size=3
+    ):
         f0 = self.infer_from_audio(audio, thred)
         f0[(f0 < f0_min) | (f0 > f0_max)] = 0
         smoothed_f0 = medfilt(f0, kernel_size=window_size)

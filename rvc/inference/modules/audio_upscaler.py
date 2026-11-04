@@ -7,7 +7,9 @@ import numpy as np
 import torch
 from tqdm import tqdm
 
-PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+PROJECT_ROOT = os.path.dirname(
+    os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+)
 FLASH_SR_DIR = os.path.join(PROJECT_ROOT, "assets", "models", "FlashSR")
 student_ldm_ckpt_path = os.path.join(FLASH_SR_DIR, "student_ldm.pth")
 sr_vocoder_ckpt_path = os.path.join(FLASH_SR_DIR, "sr_vocoder.pth")
@@ -48,16 +50,22 @@ def process_audio(input_path, output_path, overlap, flashsr, device):
     counter = torch.zeros((1,) + tuple(audio.shape), dtype=torch.float32)
 
     i = 0
-    progress_bar = tqdm(total=total_chunks, desc="Улучшаем качество аудио...", leave=False, unit="chunk")
+    progress_bar = tqdm(
+        total=total_chunks, desc="Улучшаем качество аудио...", leave=False, unit="chunk"
+    )
 
     while i < audio.shape[1]:
         part = audio[:, i : i + C]
         length = part.shape[-1]
         if length < C:
             if length > C // 2 + 1:
-                part = torch.nn.functional.pad(input=part, pad=(0, C - length), mode="reflect")
+                part = torch.nn.functional.pad(
+                    input=part, pad=(0, C - length), mode="reflect"
+                )
             else:
-                part = torch.nn.functional.pad(input=part, pad=(0, C - length, 0, 0), mode="constant", value=0)
+                part = torch.nn.functional.pad(
+                    input=part, pad=(0, C - length, 0, 0), mode="constant", value=0
+                )
 
         out = flashsr(part, lowpass_input=True).cpu()
 
@@ -93,16 +101,22 @@ def upscale(input, output, overlap, device):
 
     from FlashSR.FlashSR import FlashSR
 
-    flashsr = FlashSR(student_ldm_ckpt_path, sr_vocoder_ckpt_path, vae_ckpt_path, device)
+    flashsr = FlashSR(
+        student_ldm_ckpt_path, sr_vocoder_ckpt_path, vae_ckpt_path, device
+    )
     flashsr = flashsr.to(device)
 
     if Path(input).is_file():
         file_path = input
         filename = Path(input).name
         Path(output).mkdir(parents=True, exist_ok=True)
-        process_audio(file_path, os.path.join(output, filename), overlap, flashsr, device)
+        process_audio(
+            file_path, os.path.join(output, filename), overlap, flashsr, device
+        )
     else:
         for file_path in sorted(glob.glob(os.path.join(input, "*"))):
             filename = Path(file_path).name
             Path(output).mkdir(parents=True, exist_ok=True)
-            process_audio(file_path, os.path.join(output, filename), overlap, flashsr, device)
+            process_audio(
+                file_path, os.path.join(output, filename), overlap, flashsr, device
+            )

@@ -25,7 +25,12 @@ try:
         listdir_res = sorted(os.listdir(feature_dir))
 
         # ncols фиксируем, чтобы при сломанном определении ширины терминала tqdm не игнорировал bar_format
-        for name in tqdm(listdir_res, desc="Загрузка признаков HuBERT", bar_format="{desc}: {n}/{total}", ncols=80):
+        for name in tqdm(
+            listdir_res,
+            desc="Загрузка признаков HuBERT",
+            bar_format="{desc}: {n}/{total}",
+            ncols=80,
+        ):
             file_path = os.path.join(feature_dir, name)
             phone = np.load(file_path)
             npys.append(phone)
@@ -72,5 +77,7 @@ try:
 
 except Exception as error:
     print(f"Произошла ошибка при извлечении индекса: {error}")
-    print("Если вы запускаете этот код в виртуальной среде, убедитесь, что у вас достаточно GPU для генерации файла индекса.")
+    print(
+        "Если вы запускаете этот код в виртуальной среде, убедитесь, что у вас достаточно GPU для генерации файла индекса."
+    )
     sys.exit(1)

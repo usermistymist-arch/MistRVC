@@ -12,7 +12,9 @@ class Config:
         print("Используемое устройство: ", self.device)
 
         # Конфигурация параметров GPU
-        self.gpu_name, self.gpu_mem = self._configure_gpu() if self.device == "cuda" else (None, None)
+        self.gpu_name, self.gpu_mem = (
+            self._configure_gpu() if self.device == "cuda" else (None, None)
+        )
 
         # Установка параметров на основе памяти GPU
         self.x_pad, self.x_query, self.x_center, self.x_max = self._get_device_params()
@@ -45,7 +47,10 @@ class Config:
 def generate_config(config_save_path, sample_rate, vocoder):
     config_path = os.path.join("rvc", "training", "configs", f"{sample_rate}.json")
     if not pathlib.Path(config_save_path).exists():
-        with open(config_save_path, "w", encoding="utf-8") as f, open(config_path, encoding="utf-8") as config_file:
+        with (
+            open(config_save_path, "w", encoding="utf-8") as f,
+            open(config_path, encoding="utf-8") as config_file,
+        ):
             config_data = json.load(config_file)
             config_data["model"]["vocoder"] = vocoder
             json.dump(config_data, f, ensure_ascii=False, indent=2)

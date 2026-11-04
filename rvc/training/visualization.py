@@ -10,7 +10,13 @@ from matplotlib.colors import Normalize
 def plot_spectrogram_to_numpy(spectrogram, figsize=(10, 4), cmap="viridis"):
     """Визуализация Mel-спектрограммы."""
     fig, ax = plt.subplots(figsize=figsize)
-    im = ax.imshow(spectrogram, aspect="auto", origin="lower", cmap=cmap, norm=Normalize(vmin=-10, vmax=0))
+    im = ax.imshow(
+        spectrogram,
+        aspect="auto",
+        origin="lower",
+        cmap=cmap,
+        norm=Normalize(vmin=-10, vmax=0),
+    )
     plt.colorbar(im, ax=ax, format="%+2.0f dB")
     plt.xlabel("Кадры")
     plt.ylabel("Частотные каналы")
@@ -29,7 +35,9 @@ def mel_spectrogram_similarity(y_hat_mel, y_mel):
     y_mel = y_mel.to(device)
 
     if y_hat_mel.shape != y_mel.shape:
-        trimmed_shape = tuple(min(dim_a, dim_b) for dim_a, dim_b in zip(y_hat_mel.shape, y_mel.shape))
+        trimmed_shape = tuple(
+            min(dim_a, dim_b) for dim_a, dim_b in zip(y_hat_mel.shape, y_mel.shape)
+        )
         y_hat_mel = y_hat_mel[..., : trimmed_shape[-1]]
         y_mel = y_mel[..., : trimmed_shape[-1]]
 
@@ -38,13 +46,17 @@ def mel_spectrogram_similarity(y_hat_mel, y_mel):
     return mel_spec_similarity.clamp(0.0, 100.0)
 
 
-def _estimate_f0_autocorr(wav, sample_rate, hop_length, f0_min=50.0, f0_max=1100.0, frame_ms=40.0):
+def _estimate_f0_autocorr(
+    wav, sample_rate, hop_length, f0_min=50.0, f0_max=1100.0, frame_ms=40.0
+):
     """Быстрая оценка F0 через автокорреляцию для онлайн-метрики."""
     wav = wav.squeeze(1) if wav.dim() == 3 else wav
     original_device = wav.device
 
     # На MPS torch.fft в некоторых версиях PyTorch может быть нестабилен/недоступен.
-    wav = wav.detach().float().cpu() if wav.device.type == "mps" else wav.detach().float()
+    wav = (
+        wav.detach().float().cpu() if wav.device.type == "mps" else wav.detach().float()
+    )
 
     frame_length = int(sample_rate * frame_ms / 1000.0)
     frame_length = max(frame_length, int(sample_rate / f0_min) * 2, hop_length * 2)
@@ -84,7 +96,9 @@ def _slice_pitch(pitchf, ids_slice, segment_frames, device):
     for idx, start in enumerate(ids_slice.tolist()):
         target_slice = target[idx : idx + 1, :, start : start + segment_frames]
         if target_slice.size(-1) < segment_frames:
-            target_slice = F.pad(target_slice, (0, segment_frames - target_slice.size(-1)))
+            target_slice = F.pad(
+                target_slice, (0, segment_frames - target_slice.size(-1))
+            )
         target_slices.append(target_slice)
     return torch.cat(target_slices, dim=0).squeeze(1).to(device).float()
 
@@ -107,6 +121,9 @@ def f0_error_cents(y_hat, pitchf, ids_slice, sample_rate, hop_length, segment_fr
         return torch.as_tensor(2400.0, device=y_hat.device)
 
     cents_error = 1200.0 * torch.abs(
-        torch.log2(fake_f0[voiced_mask].clamp_min(1e-5) / target_f0[voiced_mask].clamp_min(1e-5)),
+        torch.log2(
+            fake_f0[voiced_mask].clamp_min(1e-5)
+            / target_f0[voiced_mask].clamp_min(1e-5)
+        ),
     )
     return cents_error.clamp(max=2400.0).mean()

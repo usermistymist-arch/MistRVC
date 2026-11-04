@@ -62,19 +62,25 @@ class SineGenerator(torch.nn.Module):
         batch_size, _, _ = f0.shape
 
         # Create an upsampling grid
-        upsampling_grid = torch.arange(1, upsampling_factor + 1, dtype=f0.dtype, device=f0.device)
+        upsampling_grid = torch.arange(
+            1, upsampling_factor + 1, dtype=f0.dtype, device=f0.device
+        )
 
         # Calculate phase increments
         phase_increments = (f0 / self.sampling_rate) * upsampling_grid
         phase_remainder = torch.fmod(phase_increments[:, :-1, -1:] + 0.5, 1.0) - 0.5
         cumulative_phase = phase_remainder.cumsum(dim=1).fmod(1.0).to(f0.dtype)
-        phase_increments += torch.nn.functional.pad(cumulative_phase, (0, 0, 1, 0), mode="constant")
+        phase_increments += torch.nn.functional.pad(
+            cumulative_phase, (0, 0, 1, 0), mode="constant"
+        )
 
         # Reshape to match the sine wave shape
         phase_increments = phase_increments.reshape(batch_size, -1, 1)
 
         # Scale for harmonics
-        harmonic_scale = torch.arange(1, self.waveform_dim + 1, dtype=f0.dtype, device=f0.device).reshape(1, 1, -1)
+        harmonic_scale = torch.arange(
+            1, self.waveform_dim + 1, dtype=f0.dtype, device=f0.device
+        ).reshape(1, 1, -1)
         phase_increments *= harmonic_scale
 
         # Add random phase offset (except for the fundamental)
@@ -92,7 +98,9 @@ class SineGenerator(torch.nn.Module):
             f0 = f0.unsqueeze(-1)
 
             # Generate sine waves
-            sine_waves = self._generate_sine_wave(f0, upsampling_factor) * self.sine_amplitude
+            sine_waves = (
+                self._generate_sine_wave(f0, upsampling_factor) * self.sine_amplitude
+            )
 
             # Compute voiced/unvoiced mask
             voiced_mask = self._compute_voiced_unvoiced(f0)
@@ -105,7 +113,9 @@ class SineGenerator(torch.nn.Module):
             ).transpose(2, 1)
 
             # Compute noise amplitude
-            noise_amplitude = voiced_mask * self.noise_stddev + (1 - voiced_mask) * (self.sine_amplitude / 3)
+            noise_amplitude = voiced_mask * self.noise_stddev + (1 - voiced_mask) * (
+                self.sine_amplitude / 3
+            )
 
             # Add Gaussian noise
             noise = noise_amplitude * torch.randn_like(sine_waves)
@@ -144,7 +154,9 @@ class SourceModuleHnNSF(torch.nn.Module):
         self.sine_amp = sine_amp
         self.noise_std = add_noise_std
 
-        self.l_sin_gen = SineGenerator(sample_rate, harmonic_num, sine_amp, add_noise_std, voiced_threshod)
+        self.l_sin_gen = SineGenerator(
+            sample_rate, harmonic_num, sine_amp, add_noise_std, voiced_threshod
+        )
         self.l_linear = torch.nn.Linear(harmonic_num + 1, 1)
         self.l_tanh = torch.nn.Tanh()
 
@@ -195,13 +207,21 @@ class HiFiGANNSFGenerator(torch.nn.Module):
         self.f0_upsamp = torch.nn.Upsample(scale_factor=math.prod(upsample_rates))
         self.m_source = SourceModuleHnNSF(sample_rate=sr, harmonic_num=0)
 
-        self.conv_pre = torch.nn.Conv1d(initial_channel, upsample_initial_channel, 7, 1, padding=3)
+        self.conv_pre = torch.nn.Conv1d(
+            initial_channel, upsample_initial_channel, 7, 1, padding=3
+        )
 
         self.ups = torch.nn.ModuleList()
         self.noise_convs = torch.nn.ModuleList()
 
-        channels = [upsample_initial_channel // (2 ** (i + 1)) for i in range(len(upsample_rates))]
-        stride_f0s = [math.prod(upsample_rates[i + 1 :]) if i + 1 < len(upsample_rates) else 1 for i in range(len(upsample_rates))]
+        channels = [
+            upsample_initial_channel // (2 ** (i + 1))
+            for i in range(len(upsample_rates))
+        ]
+        stride_f0s = [
+            math.prod(upsample_rates[i + 1 :]) if i + 1 < len(upsample_rates) else 1
+            for i in range(len(upsample_rates))
+        ]
 
         for i, (u, k) in enumerate(zip(upsample_rates, upsample_kernel_sizes)):
             # handling odd upsampling rates
@@ -249,7 +269,11 @@ class HiFiGANNSFGenerator(torch.nn.Module):
             )
 
         self.resblocks = torch.nn.ModuleList(
-            [ResBlock(channels[i], k, d) for i in range(len(self.ups)) for k, d in zip(resblock_kernel_sizes, resblock_dilation_sizes)],
+            [
+                ResBlock(channels[i], k, d)
+                for i in range(len(self.ups))
+                for k, d in zip(resblock_kernel_sizes, resblock_dilation_sizes)
+            ],
         )
 
         self.conv_post = torch.nn.Conv1d(channels[-1], 1, 7, 1, padding=3, bias=False)
@@ -309,10 +333,16 @@ class HiFiGANNSFGenerator(torch.nn.Module):
     def __prepare_scriptable__(self):
         for l in self.ups:
             for hook in l._forward_pre_hooks.values():
-                if hook.__module__ == "torch.nn.utils.parametrizations.weight_norm" and hook.__class__.__name__ == "WeightNorm":
+                if (
+                    hook.__module__ == "torch.nn.utils.parametrizations.weight_norm"
+                    and hook.__class__.__name__ == "WeightNorm"
+                ):
                     remove_weight_norm(l)
         for l in self.resblocks:
             for hook in l._forward_pre_hooks.values():
-                if hook.__module__ == "torch.nn.utils.parametrizations.weight_norm" and hook.__class__.__name__ == "WeightNorm":
+                if (
+                    hook.__module__ == "torch.nn.utils.parametrizations.weight_norm"
+                    and hook.__class__.__name__ == "WeightNorm"
+                ):
                     remove_weight_norm(l)
         return self

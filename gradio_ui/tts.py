@@ -137,7 +137,9 @@ def tts_tab():
     settings = conversion_settings()
 
     # Обновление списка TTS-голосов
-    language.change(update_edge_voices, inputs=language, outputs=tts_voice, api_name=False)
+    language.change(
+        update_edge_voices, inputs=language, outputs=tts_voice, api_name=False
+    )
 
     # Обновление списка моделей — внутри model_select(); авто-тон — внутри pitch_group().
 

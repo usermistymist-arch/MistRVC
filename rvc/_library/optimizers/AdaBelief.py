@@ -87,8 +87,12 @@ class AdaBelief(Optimizer):
 
                 if len(state) == 0:
                     state["step"] = 0
-                    state["exp_avg"] = torch.zeros_like(p, memory_format=torch.preserve_format)
-                    state["exp_avg_var"] = torch.zeros_like(p, memory_format=torch.preserve_format)
+                    state["exp_avg"] = torch.zeros_like(
+                        p, memory_format=torch.preserve_format
+                    )
+                    state["exp_avg_var"] = torch.zeros_like(
+                        p, memory_format=torch.preserve_format
+                    )
 
                 exp_avgs.append(state["exp_avg"])
                 exp_avg_vars.append(state["exp_avg_var"])
@@ -114,7 +118,9 @@ class AdaBelief(Optimizer):
             # grad_residuals = grad - exp_avg
             grad_residuals = torch._foreach_sub(grads, exp_avgs)
             torch._foreach_mul_(exp_avg_vars, beta2)
-            torch._foreach_addcmul_(exp_avg_vars, grad_residuals, grad_residuals, value=1 - beta2)
+            torch._foreach_addcmul_(
+                exp_avg_vars, grad_residuals, grad_residuals, value=1 - beta2
+            )
 
             denom = torch._foreach_add(exp_avg_vars, eps)
             denom = torch._foreach_sqrt(denom)

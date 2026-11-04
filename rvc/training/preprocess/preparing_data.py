@@ -17,16 +17,22 @@ import torch
 from tqdm import tqdm
 
 # Корень репозитория: скрипт может запускаться из любого каталога
-PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+PROJECT_ROOT = os.path.dirname(
+    os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+)
 sys.path.append(PROJECT_ROOT)
 from rvc._library.audio import load_audio
 from rvc._library.embedders.fairseq import load_model
 from rvc._library.predictors.f0 import RMVPEF0
 
-exp_dir = str(sys.argv[1])  # Директория с данными, подготовленными скриптом `preprocess.py`
+exp_dir = str(
+    sys.argv[1]
+)  # Директория с данными, подготовленными скриптом `preprocess.py`
 f0_method = str(sys.argv[2])  # Метод извлечения F0 / rmvpe, rmvpe+, hpa-rmvpe
 sample_rate = int(sys.argv[3])  # Частота дискретизации для генерации filelist.txt
-include_mutes = int(sys.argv[4])  # Количество мьют файлов на одного спикера / По умолчанию = 2
+include_mutes = int(
+    sys.argv[4]
+)  # Количество мьют файлов на одного спикера / По умолчанию = 2
 
 
 class DataPreprocessor:
@@ -50,7 +56,9 @@ class DataPreprocessor:
 
     def _load_hubert_model(self):
         """Загрузка модели HuBERT"""
-        hubert_model_path = os.path.join(PROJECT_ROOT, "assets", "models", "embedders", "contentvec_base.pt")
+        hubert_model_path = os.path.join(
+            PROJECT_ROOT, "assets", "models", "embedders", "contentvec_base.pt"
+        )
         return load_model(hubert_model_path).to(self.device).eval()
 
     def _read_16k(self, path):
@@ -71,11 +79,16 @@ class DataPreprocessor:
     def coarse_f0(self, f0):
         """Квантование F0"""
         f0_mel = 1127 * np.log(1 + f0 / 700)
-        f0_mel[f0_mel > 0] = (f0_mel[f0_mel > 0] - self.f0_mel_min) * (self.f0_bin - 2) / (self.f0_mel_max - self.f0_mel_min) + 1
+        f0_mel[f0_mel > 0] = (f0_mel[f0_mel > 0] - self.f0_mel_min) * (
+            self.f0_bin - 2
+        ) / (self.f0_mel_max - self.f0_mel_min) + 1
         f0_mel[f0_mel <= 1] = 1
         f0_mel[f0_mel > self.f0_bin - 1] = self.f0_bin - 1
         f0_coarse = np.rint(f0_mel).astype(int)
-        assert f0_coarse.max() <= 255 and f0_coarse.min() >= 1, (f0_coarse.max(), f0_coarse.min())
+        assert f0_coarse.max() <= 255 and f0_coarse.min() >= 1, (
+            f0_coarse.max(),
+            f0_coarse.min(),
+        )
         return f0_coarse
 
     def extract_features(self, wav_path):
@@ -85,19 +98,25 @@ class DataPreprocessor:
         padding_mask = torch.zeros(source.shape, dtype=torch.bool, device=self.device)
 
         with torch.no_grad():
-            logits = self.hubert_model.extract_features(source=source, padding_mask=padding_mask, output_layer=12)
+            logits = self.hubert_model.extract_features(
+                source=source, padding_mask=padding_mask, output_layer=12
+            )
             return logits[0].squeeze(0).float().cpu().numpy()
 
     def process_files(self):
         """Основной метод обработки файлов"""
         cache_root = f"{exp_dir}/data/sliced_audios_16k"
-        if os.path.isdir(cache_root) and any(name.endswith(".wav") for name in os.listdir(cache_root)):
+        if os.path.isdir(cache_root) and any(
+            name.endswith(".wav") for name in os.listdir(cache_root)
+        ):
             inp_root = cache_root
         else:
             # Каталог нарезан до появления 16 кГц-кэша: работает, но медленно
             inp_root = f"{exp_dir}/data/sliced_audios"
             self.use_16k_cache = False
-            print("⚠ Нет sliced_audios_16k — читаю с ресемплом. Перезапустите нарезку для скорости.")
+            print(
+                "⚠ Нет sliced_audios_16k — читаю с ресемплом. Перезапустите нарезку для скорости."
+            )
         f0_quant_path = f"{exp_dir}/data/f0_quantized"
         f0_voiced_path = f"{exp_dir}/data/f0_voiced"
         features_path = f"{exp_dir}/data/features"
@@ -115,21 +134,36 @@ class DataPreprocessor:
 
         # ncols фиксируем, чтобы при сломанном определении ширины терминала tqdm не игнорировал bar_format
         # Обработка файлов
-        for file in tqdm(files, desc="Извлечение F0 (фундаментальной частоты)", bar_format="{desc}: {n}/{total}", ncols=80):
+        for file in tqdm(
+            files,
+            desc="Извлечение F0 (фундаментальной частоты)",
+            bar_format="{desc}: {n}/{total}",
+            ncols=80,
+        ):
             try:
                 inp_path = f"{inp_root}/{file}"
                 opt_path1 = f"{f0_quant_path}/{file}"
                 opt_path2 = f"{f0_voiced_path}/{file}"
 
-                if not (os.path.exists(opt_path1 + ".npy") and os.path.exists(opt_path2 + ".npy")):
+                if not (
+                    os.path.exists(opt_path1 + ".npy")
+                    and os.path.exists(opt_path2 + ".npy")
+                ):
                     featur_pit = self.compute_f0(inp_path, f0_method)
                     np.save(opt_path2, featur_pit, allow_pickle=False)
                     coarse_pit = self.coarse_f0(featur_pit)
                     np.save(opt_path1, coarse_pit, allow_pickle=False)
             except:
-                raise RuntimeError(f"Ошибка извлечения тона!\nФайл - {inp_path}\n{traceback.format_exc()}")
+                raise RuntimeError(
+                    f"Ошибка извлечения тона!\nФайл - {inp_path}\n{traceback.format_exc()}"
+                )
 
-        for file in tqdm(files, desc="Извлечение семантических признаков HuBERT", bar_format="{desc}: {n}/{total}", ncols=80):
+        for file in tqdm(
+            files,
+            desc="Извлечение семантических признаков HuBERT",
+            bar_format="{desc}: {n}/{total}",
+            ncols=80,
+        ):
             try:
                 wav_path = f"{inp_root}/{file}"
                 out_path = f"{features_path}/{file.replace('.wav', '.npy')}"
@@ -137,10 +171,14 @@ class DataPreprocessor:
                 if not os.path.exists(out_path):
                     feats = self.extract_features(wav_path)
                     if np.isnan(feats).sum() > 0:
-                        raise TypeError(f"Файл {file} содержит некорректные значения (NaN).")
+                        raise TypeError(
+                            f"Файл {file} содержит некорректные значения (NaN)."
+                        )
                     np.save(out_path, feats, allow_pickle=False)
             except:
-                raise RuntimeError(f"Ошибка извлечения признаков!\nФайл - {wav_path}\n{traceback.format_exc()}")
+                raise RuntimeError(
+                    f"Ошибка извлечения признаков!\nФайл - {wav_path}\n{traceback.format_exc()}"
+                )
 
         print("✓ Извлечение акустических признаков успешно завершено!")
 
@@ -182,17 +220,23 @@ def generate_filelist(model_path: str, sample_rate: int, include_mutes: int = 2)
         )
 
     if include_mutes > 0:
-        mute_audio_path = os.path.join(mute_base_path, "sliced_audios", f"mute{sample_rate}.wav")
+        mute_audio_path = os.path.join(
+            mute_base_path, "sliced_audios", f"mute{sample_rate}.wav"
+        )
         mute_feature_path = os.path.join(mute_base_path, "features", "mute.npy")
         mute_f0_path = os.path.join(mute_base_path, "f0_quantized", "mute.wav.npy")
         mute_f0nsf_path = os.path.join(mute_base_path, "f0_voiced", "mute.wav.npy")
 
         for _ in range(include_mutes):
-            options.append(f"{mute_audio_path}|{mute_feature_path}|{mute_f0_path}|{mute_f0nsf_path}|0")
+            options.append(
+                f"{mute_audio_path}|{mute_feature_path}|{mute_f0_path}|{mute_f0nsf_path}|0"
+            )
 
     shuffle(options)
 
-    with open(os.path.join(model_path, "data", "filelist.txt"), "w", encoding="utf-8") as f:
+    with open(
+        os.path.join(model_path, "data", "filelist.txt"), "w", encoding="utf-8"
+    ) as f:
         f.write("\n".join(options))
 
 

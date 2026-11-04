@@ -11,7 +11,9 @@ from gradio_ui.common import PROJECT_ROOT, model_dropdowns, refresh_models
 
 EMBEDDERS_DIR = os.path.join(PROJECT_ROOT, "assets", "models", "embedders")
 EMBEDDER_PATH = os.path.join(EMBEDDERS_DIR, "contentvec_base.pt")
-EMBEDDER_BASE_URL = "https://huggingface.co/Politrees/RVC_resources/resolve/main/embedders/pytorch/"
+EMBEDDER_BASE_URL = (
+    "https://huggingface.co/Politrees/RVC_resources/resolve/main/embedders/pytorch/"
+)
 EMBEDDER_MODELS = [
     "contentvec_base.pt",
     "hubert_base.pt",
@@ -47,7 +49,10 @@ def _install_embedder(model_name, custom_url, progress=gr.Progress()):
                 return "Ошибка: URL должен вести к .pt файлу или заканчиваться на '?download=true'."
             if urllib.parse.urlparse(custom_url).netloc != "huggingface.co":
                 return "Ошибка: разрешён только huggingface.co."
-            model_url, model_name = custom_url, os.path.basename(urllib.parse.urlparse(custom_url).path)
+            model_url, model_name = (
+                custom_url,
+                os.path.basename(urllib.parse.urlparse(custom_url).path),
+            )
         else:
             model_url = EMBEDDER_BASE_URL + model_name
 
@@ -68,7 +73,9 @@ def _install_embedder(model_name, custom_url, progress=gr.Progress()):
 def _toggle_custom_embedder(enabled: bool):
     if enabled:
         return gr.update(visible=True, value=""), gr.update(visible=False)
-    return gr.update(visible=False, value=""), gr.update(visible=True, value="contentvec_base.pt")
+    return gr.update(visible=False, value=""), gr.update(
+        visible=True, value="contentvec_base.pt"
+    )
 
 
 def models_tab(offline: bool):
@@ -76,26 +83,34 @@ def models_tab(offline: bool):
     # изменения сами — после загрузки модели и при открытии вкладки.
     with gr.Group(), gr.Row(equal_height=True):
         refresh_btn = gr.Button("Обновить список моделей", variant="secondary", scale=1)
-        gr.Markdown("Список голосовых моделей обновляется сам: после загрузки и при открытии вкладки «Конвертация».")
+        gr.Markdown(
+            "Список голосовых моделей обновляется сам: после загрузки и при открытии вкладки «Конвертация»."
+        )
     refresh_btn.click(refresh_models, outputs=model_dropdowns(), api_name=False)
 
     if not offline:
         with gr.Accordion("По ссылке (ZIP)", open=False):
-            gr.Markdown("HuggingFace · Pixeldrain · Google Drive · Mega · Яндекс Диск · Dropbox")
+            gr.Markdown(
+                "HuggingFace · Pixeldrain · Google Drive · Mega · Яндекс Диск · Dropbox"
+            )
             with gr.Row():
                 zip_link = gr.Textbox(label="Ссылка", scale=3)
                 url_name = gr.Textbox(label="Имя модели", scale=2)
             url_btn = gr.Button("Скачать", variant="primary")
 
     with gr.Accordion("ZIP-файл", open=False):
-        zip_file = gr.File(label="ZIP", file_types=[".zip"], file_count="single", scale=3)
+        zip_file = gr.File(
+            label="ZIP", file_types=[".zip"], file_count="single", scale=3
+        )
         zip_name = gr.Textbox(label="Имя модели", scale=2)
         zip_btn = gr.Button("Загрузить", variant="primary")
 
     with gr.Accordion("Файлы .pth + .index", open=False):
         with gr.Row():
             pth_file = gr.File(label=".pth", file_types=[".pth"], file_count="single")
-            index_file = gr.File(label=".index", file_types=[".index"], file_count="single")
+            index_file = gr.File(
+                label=".index", file_types=[".index"], file_count="single"
+            )
         files_name = gr.Textbox(label="Имя модели")
         files_btn = gr.Button("Загрузить", variant="primary")
 
@@ -105,7 +120,12 @@ def models_tab(offline: bool):
             with gr.Row():
                 custom_check = gr.Checkbox(False, label="Свой URL")
                 custom_url = gr.Textbox(label="URL модели", visible=False, scale=3)
-                embedder_drop = gr.Dropdown(EMBEDDER_MODELS, value="contentvec_base.pt", label="Эмбеддер", scale=3)
+                embedder_drop = gr.Dropdown(
+                    EMBEDDER_MODELS,
+                    value="contentvec_base.pt",
+                    label="Эмбеддер",
+                    scale=3,
+                )
             embedder_btn = gr.Button("Установить", variant="primary")
             custom_check.change(
                 _toggle_custom_embedder,
@@ -118,7 +138,9 @@ def models_tab(offline: bool):
     message = gr.Textbox(label="Результат", interactive=False)
 
     if not offline:
-        url_btn.click(_download_from_url, inputs=[zip_link, url_name], outputs=message).then(
+        url_btn.click(
+            _download_from_url, inputs=[zip_link, url_name], outputs=message
+        ).then(
             refresh_models,
             outputs=model_dropdowns(),
             api_name=False,
@@ -128,10 +150,14 @@ def models_tab(offline: bool):
         outputs=model_dropdowns(),
         api_name=False,
     )
-    files_btn.click(_upload_files, inputs=[pth_file, index_file, files_name], outputs=message).then(
+    files_btn.click(
+        _upload_files, inputs=[pth_file, index_file, files_name], outputs=message
+    ).then(
         refresh_models,
         outputs=model_dropdowns(),
         api_name=False,
     )
     if not offline:
-        embedder_btn.click(_install_embedder, inputs=[embedder_drop, custom_url], outputs=message)
+        embedder_btn.click(
+            _install_embedder, inputs=[embedder_drop, custom_url], outputs=message
+        )

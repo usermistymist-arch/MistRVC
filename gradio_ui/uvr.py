@@ -14,13 +14,23 @@ import shutil
 import gradio as gr
 import torch
 from PolUVR.separator import Separator
-from UVR_resources import FORMATS, MDX23C_MODELS, MDXNET_MODELS, ROFORMER_MODELS, VR_ARCH_MODELS, DEMUCS_v4_MODELS
+from UVR_resources import (
+    FORMATS,
+    MDX23C_MODELS,
+    MDXNET_MODELS,
+    ROFORMER_MODELS,
+    VR_ARCH_MODELS,
+    DEMUCS_v4_MODELS,
+)
 
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 USE_AUTOCAST = DEVICE == "cuda"
 
 ARCHES = {
-    "Roformer": {"models": ROFORMER_MODELS, "default": "MelBand Roformer | Vocals by becruily"},
+    "Roformer": {
+        "models": ROFORMER_MODELS,
+        "default": "MelBand Roformer | Vocals by becruily",
+    },
     "MDX23C": {"models": MDX23C_MODELS, "default": "MDX23C InstVoc HQ"},
     "MDX-NET": {"models": MDXNET_MODELS, "default": "UVR-MDX-NET Inst HQ 5"},
     "VR Arch": {"models": VR_ARCH_MODELS, "default": "1_HP-UVR"},
@@ -37,7 +47,13 @@ def _stem_results(results, output_dir):
     for num in range(6):
         if num < len(results):
             path = os.path.join(output_dir, results[num])
-            outputs.append(gr.update(value=path, visible=True, label=f"Стем {num + 1} ({os.path.basename(path)})"))
+            outputs.append(
+                gr.update(
+                    value=path,
+                    visible=True,
+                    label=f"Стем {num + 1} ({os.path.basename(path)})",
+                )
+            )
         else:
             outputs.append(gr.update(visible=False))
     return outputs
@@ -68,7 +84,11 @@ def _switch_arch(arch):
     """Обновляет список моделей и видимую группу параметров."""
     info = ARCHES[arch]
     choices = sorted(info["models"])
-    default = info["default"] if info["default"] in info["models"] else (choices[0] if choices else None)
+    default = (
+        info["default"]
+        if info["default"] in info["models"]
+        else (choices[0] if choices else None)
+    )
     updates = [gr.update(choices=choices, value=default)]
     updates.extend(gr.update(visible=name == arch) for name in ARCHES)
     return updates
@@ -194,7 +214,9 @@ def _separate(
         _release_inference_cache()
         out_dir = _prepare_output_dir(audio_path, output_dir)
         stem_names = {
-            "All Stems": rename_template.replace("NAME", base_name).replace("STEM", "All Stems").replace("MODEL", model_key),
+            "All Stems": rename_template.replace("NAME", base_name)
+            .replace("STEM", "All Stems")
+            .replace("MODEL", model_key),
         }
 
         separator = Separator(
@@ -225,7 +247,9 @@ def _separate(
 
 def uvr_tab(models_dir: str, output_dir: str):
     with gr.Row():
-        arch = gr.Dropdown(sorted(ARCHES), value="Roformer", label="Архитектура", scale=1)
+        arch = gr.Dropdown(
+            sorted(ARCHES), value="Roformer", label="Архитектура", scale=1
+        )
         roformer_default = ARCHES["Roformer"]["default"]
         model = gr.Dropdown(
             sorted(ROFORMER_MODELS),
@@ -240,29 +264,65 @@ def uvr_tab(models_dir: str, output_dir: str):
     with gr.Accordion("Параметры", open=False):
         with gr.Row():
             batch_size = gr.Slider(minimum=1, maximum=16, step=1, value=1, label="Батч")
-            norm_threshold = gr.Slider(minimum=0.1, maximum=1, step=0.1, value=0.9, label="Нормализация")
-            amp_threshold = gr.Slider(minimum=0.0, maximum=1, step=0.1, value=0.0, label="Усиление тихих мест")
+            norm_threshold = gr.Slider(
+                minimum=0.1, maximum=1, step=0.1, value=0.9, label="Нормализация"
+            )
+            amp_threshold = gr.Slider(
+                minimum=0.0, maximum=1, step=0.1, value=0.0, label="Усиление тихих мест"
+            )
 
         with gr.Group(visible=True) as roformer_group:
             rof_override = gr.Checkbox(False, label="Свой размер сегмента")
             with gr.Row():
-                rof_seg = gr.Slider(minimum=32, maximum=4000, step=32, value=256, label="Сегмент", visible=False)
-                rof_overlap = gr.Slider(minimum=2, maximum=10, step=1, value=8, label="Перекрытие")
-                rof_pitch = gr.Slider(minimum=-24, maximum=24, step=1, value=0, label="Сдвиг тона")
+                rof_seg = gr.Slider(
+                    minimum=32,
+                    maximum=4000,
+                    step=32,
+                    value=256,
+                    label="Сегмент",
+                    visible=False,
+                )
+                rof_overlap = gr.Slider(
+                    minimum=2, maximum=10, step=1, value=8, label="Перекрытие"
+                )
+                rof_pitch = gr.Slider(
+                    minimum=-24, maximum=24, step=1, value=0, label="Сдвиг тона"
+                )
 
         with gr.Group(visible=False) as mdxc_group:
             mdxc_override = gr.Checkbox(False, label="Свой размер сегмента")
             with gr.Row():
-                mdxc_seg = gr.Slider(minimum=32, maximum=4000, step=32, value=256, label="Сегмент", visible=False)
-                mdxc_overlap = gr.Slider(minimum=2, maximum=50, step=1, value=8, label="Перекрытие")
-                mdxc_pitch = gr.Slider(minimum=-24, maximum=24, step=1, value=0, label="Сдвиг тона")
+                mdxc_seg = gr.Slider(
+                    minimum=32,
+                    maximum=4000,
+                    step=32,
+                    value=256,
+                    label="Сегмент",
+                    visible=False,
+                )
+                mdxc_overlap = gr.Slider(
+                    minimum=2, maximum=50, step=1, value=8, label="Перекрытие"
+                )
+                mdxc_pitch = gr.Slider(
+                    minimum=-24, maximum=24, step=1, value=0, label="Сдвиг тона"
+                )
 
         with gr.Group(visible=False) as mdx_group:
             mdx_denoise = gr.Checkbox(False, label="Шумоподавление после разделения")
             with gr.Row():
-                mdx_hop = gr.Slider(minimum=32, maximum=2048, step=32, value=1024, label="Hop Length")
-                mdx_seg = gr.Slider(minimum=32, maximum=4000, step=32, value=256, label="Сегмент")
-                mdx_overlap = gr.Slider(minimum=0.001, maximum=0.999, step=0.001, value=0.25, label="Перекрытие")
+                mdx_hop = gr.Slider(
+                    minimum=32, maximum=2048, step=32, value=1024, label="Hop Length"
+                )
+                mdx_seg = gr.Slider(
+                    minimum=32, maximum=4000, step=32, value=256, label="Сегмент"
+                )
+                mdx_overlap = gr.Slider(
+                    minimum=0.001,
+                    maximum=0.999,
+                    step=0.001,
+                    value=0.25,
+                    label="Перекрытие",
+                )
 
         with gr.Group(visible=False) as vr_group:
             with gr.Row():
@@ -270,16 +330,37 @@ def uvr_tab(models_dir: str, output_dir: str):
                 vr_tta = gr.Checkbox(False, label="TTA")
                 vr_high_end = gr.Checkbox(False, label="Восстановить верха")
             with gr.Row():
-                vr_post_thr = gr.Slider(minimum=0.1, maximum=0.3, step=0.1, value=0.2, label="Порог пост-обработки", visible=False)
-                vr_window = gr.Slider(minimum=320, maximum=1024, step=32, value=512, label="Окно")
-                vr_aggr = gr.Slider(minimum=1, maximum=100, step=1, value=5, label="Агрессия")
+                vr_post_thr = gr.Slider(
+                    minimum=0.1,
+                    maximum=0.3,
+                    step=0.1,
+                    value=0.2,
+                    label="Порог пост-обработки",
+                    visible=False,
+                )
+                vr_window = gr.Slider(
+                    minimum=320, maximum=1024, step=32, value=512, label="Окно"
+                )
+                vr_aggr = gr.Slider(
+                    minimum=1, maximum=100, step=1, value=5, label="Агрессия"
+                )
 
         with gr.Group(visible=False) as demucs_group:
             demucs_segen = gr.Checkbox(True, label="Обработка по сегментам")
             with gr.Row():
-                demucs_seg = gr.Slider(minimum=1, maximum=100, step=1, value=40, label="Сегмент")
-                demucs_overlap = gr.Slider(minimum=0.001, maximum=0.999, step=0.001, value=0.25, label="Перекрытие")
-                demucs_shifts = gr.Slider(minimum=0, maximum=20, step=1, value=2, label="Сдвиги")
+                demucs_seg = gr.Slider(
+                    minimum=1, maximum=100, step=1, value=40, label="Сегмент"
+                )
+                demucs_overlap = gr.Slider(
+                    minimum=0.001,
+                    maximum=0.999,
+                    step=0.001,
+                    value=0.25,
+                    label="Перекрытие",
+                )
+                demucs_shifts = gr.Slider(
+                    minimum=0, maximum=20, step=1, value=2, label="Сдвиги"
+                )
 
     with gr.Accordion("Папки и имена файлов", open=False):
         with gr.Row():
@@ -297,14 +378,33 @@ def uvr_tab(models_dir: str, output_dir: str):
     with gr.Column():
         for pair in range(0, 6, 2):
             with gr.Row():
-                stems.append(gr.Audio(visible=False, interactive=False, label=f"Стем {pair + 1}"))
-                stems.append(gr.Audio(visible=False, interactive=False, label=f"Стем {pair + 2}"))
+                stems.append(
+                    gr.Audio(visible=False, interactive=False, label=f"Стем {pair + 1}")
+                )
+                stems.append(
+                    gr.Audio(visible=False, interactive=False, label=f"Стем {pair + 2}")
+                )
 
     groups = [roformer_group, mdxc_group, mdx_group, vr_group, demucs_group]
     arch.change(_switch_arch, inputs=arch, outputs=[model, *groups], api_name=False)
-    rof_override.change(lambda v: gr.update(visible=v), inputs=rof_override, outputs=rof_seg, api_name=False)
-    mdxc_override.change(lambda v: gr.update(visible=v), inputs=mdxc_override, outputs=mdxc_seg, api_name=False)
-    vr_post.change(lambda v: gr.update(visible=v), inputs=vr_post, outputs=vr_post_thr, api_name=False)
+    rof_override.change(
+        lambda v: gr.update(visible=v),
+        inputs=rof_override,
+        outputs=rof_seg,
+        api_name=False,
+    )
+    mdxc_override.change(
+        lambda v: gr.update(visible=v),
+        inputs=mdxc_override,
+        outputs=mdxc_seg,
+        api_name=False,
+    )
+    vr_post.change(
+        lambda v: gr.update(visible=v),
+        inputs=vr_post,
+        outputs=vr_post_thr,
+        api_name=False,
+    )
 
     separate_btn.click(
         _separate,

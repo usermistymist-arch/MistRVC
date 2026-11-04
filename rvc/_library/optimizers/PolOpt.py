@@ -83,8 +83,12 @@ class PolOpt(Optimizer):
                 # Инициализация состояния
                 if len(state) == 0:
                     state["step"] = 0
-                    state["exp_avg"] = torch.zeros_like(p, memory_format=torch.preserve_format)
-                    state["exp_avg_var"] = torch.zeros_like(p, memory_format=torch.preserve_format)
+                    state["exp_avg"] = torch.zeros_like(
+                        p, memory_format=torch.preserve_format
+                    )
+                    state["exp_avg_var"] = torch.zeros_like(
+                        p, memory_format=torch.preserve_format
+                    )
 
                 state["step"] += 1
                 step = state["step"]

@@ -17,12 +17,26 @@ from rvc.inference.pipeline import VC
 # Определяем пути к папкам и файлам (константы).
 # Корень репозитория, а не текущий каталог: обучение запускается отдельными
 # процессами с cwd = корень проекта, поэтому папки должны совпадать.
-PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+PROJECT_ROOT = os.path.dirname(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+)
 RVC_MODELS_DIR = os.path.join(PROJECT_ROOT, "models", "RVC_models")
 OUTPUT_DIR = os.path.join(PROJECT_ROOT, "output", "RVC_output")
-EMBEDDER_PATH = os.path.join(PROJECT_ROOT, "assets", "models", "embedders", "contentvec_base.pt")
+EMBEDDER_PATH = os.path.join(
+    PROJECT_ROOT, "assets", "models", "embedders", "contentvec_base.pt"
+)
 
-AUDIO_EXTENSIONS = {".wav", ".flac", ".mp3", ".ogg", ".m4a", ".aac", ".opus", ".wma", ".aiff"}
+AUDIO_EXTENSIONS = {
+    ".wav",
+    ".flac",
+    ".mp3",
+    ".ogg",
+    ".m4a",
+    ".aac",
+    ".opus",
+    ".wma",
+    ".aiff",
+}
 
 # Создаем папки, если их нет
 os.makedirs(RVC_MODELS_DIR, exist_ok=True)
@@ -43,12 +57,28 @@ def display_progress(percent, message, is_print, progress=gr.Progress()):
 def load_rvc_model(rvc_model):
     model_dir = os.path.join(RVC_MODELS_DIR, rvc_model)
     if not os.path.isdir(model_dir):
-        raise FileNotFoundError(f"Папка модели {rvc_model} не найдена в {RVC_MODELS_DIR}")
+        raise FileNotFoundError(
+            f"Папка модели {rvc_model} не найдена в {RVC_MODELS_DIR}"
+        )
 
     # Находим файл модели с расширением .pth
-    rvc_model_path = next((os.path.join(model_dir, f) for f in os.listdir(model_dir) if f.endswith(".pth")), None)
+    rvc_model_path = next(
+        (
+            os.path.join(model_dir, f)
+            for f in os.listdir(model_dir)
+            if f.endswith(".pth")
+        ),
+        None,
+    )
     # Находим файл индекса с расширением .index
-    rvc_index_path = next((os.path.join(model_dir, f) for f in os.listdir(model_dir) if f.endswith(".index")), None)
+    rvc_index_path = next(
+        (
+            os.path.join(model_dir, f)
+            for f in os.listdir(model_dir)
+            if f.endswith(".index")
+        ),
+        None,
+    )
 
     # Проверяем, существует ли файл модели
     if not rvc_model_path:
@@ -68,7 +98,9 @@ def get_vc(model_path):
     # Загружаем состояние модели
     cpt = torch.load(model_path, map_location="cpu", weights_only=True)
     if "config" not in cpt or "weight" not in cpt:
-        raise ValueError(f"Некорректный формат модели {model_path}. Используйте модель RVC.")
+        raise ValueError(
+            f"Некорректный формат модели {model_path}. Используйте модель RVC."
+        )
 
     # MistRVC поддерживает только v2-модели с питчем
     model_name = os.path.basename(model_path)
@@ -102,16 +134,26 @@ def get_vc(model_path):
 # Синтезирует текст в речь с использованием edge_tts.
 async def text_to_speech(voice, text, rate, volume, pitch, output_path):
     if not -100 <= rate <= 100 or not -100 <= volume <= 100 or not -100 <= pitch <= 100:
-        raise ValueError("Параметры Rate, Volume и Pitch должны быть в диапазоне от -100 до +100.")
+        raise ValueError(
+            "Параметры Rate, Volume и Pitch должны быть в диапазоне от -100 до +100."
+        )
 
-    communicate = edge_tts.Communicate(voice=voice, text=text, rate=f"{rate:+d}%", volume=f"{volume:+d}%", pitch=f"{pitch:+d}Hz")
+    communicate = edge_tts.Communicate(
+        voice=voice,
+        text=text,
+        rate=f"{rate:+d}%",
+        volume=f"{volume:+d}%",
+        pitch=f"{pitch:+d}Hz",
+    )
     await communicate.save(output_path)
 
 
 # Собирает путь выходного файла вида `<имя>_(<модель>).<формат>`
 def build_output_path(input_path, output_dir, rvc_model, output_format):
     base_name = os.path.splitext(os.path.basename(input_path))[0]
-    if len(base_name) > 100:  # Сменить имя выходного файла, если длина исходного более 100 символов
+    if (
+        len(base_name) > 100
+    ):  # Сменить имя выходного файла, если длина исходного более 100 символов
         gr.Warning("Имя файла превышает 100 символов и будет сокращено для удобства.")
         base_name = f"{base_name[:25]}... (Made_in_MistRVC)"
     os.makedirs(output_dir, exist_ok=True)
@@ -179,7 +221,11 @@ def get_pipeline(rvc_model):
     stamp = _file_stamp(model_path)
     with _pipeline_lock:
         cached = _pipeline_cache
-        if cached["name"] == rvc_model and cached["pipe"] is not None and cached["stamp"] == stamp:
+        if (
+            cached["name"] == rvc_model
+            and cached["pipe"] is not None
+            and cached["stamp"] == stamp
+        ):
             # Индекс читается из файла на каждом запуске (pipeline.py) — обновляем путь,
             # чтобы появившийся позже .index подхватился без перезагрузки модели.
             cached["pipe"]["index_path"] = index_path
@@ -235,7 +281,9 @@ def convert_one(
     display_progress(0.4, "Загружаем аудио...", False)
     audio = load_audio(input_path, 16000)
 
-    display_progress(0.5, f"[🌌] Преобразуем аудио '{os.path.basename(input_path)}'...", True)
+    display_progress(
+        0.5, f"[🌌] Преобразуем аудио '{os.path.basename(input_path)}'...", True
+    )
     audio_opt = pipe["vc"].pipeline(
         model=pipe["embedder"],
         net_g=pipe["net_g"],
@@ -331,7 +379,10 @@ def collect_batch_inputs(dir_input, files):
             raise ValueError(f"Папка не найдена: {folder}")
         for name in sorted(os.listdir(folder)):
             path = os.path.join(folder, name)
-            if os.path.isfile(path) and os.path.splitext(name)[1].lower() in AUDIO_EXTENSIONS:
+            if (
+                os.path.isfile(path)
+                and os.path.splitext(name)[1].lower() in AUDIO_EXTENSIONS
+            ):
                 inputs.append(path)
     for item in files or []:
         path = getattr(item, "name", None) or (item if isinstance(item, str) else None)
@@ -371,16 +422,25 @@ def rvc_batch_infer(
     if not inputs:
         raise ValueError("Нет аудиофайлов: укажите папку или прикрепите файлы.")
 
-    target_dir = str(output_dir).strip() if output_dir and str(output_dir).strip() else OUTPUT_DIR
+    target_dir = (
+        str(output_dir).strip()
+        if output_dir and str(output_dir).strip()
+        else OUTPUT_DIR
+    )
     os.makedirs(target_dir, exist_ok=True)
 
     print(f"\n[⚙️] Пакетная конвертация: {len(inputs)} файл(ов), модель '{rvc_model}'")
     pipe = get_pipeline(rvc_model)
     done, failed = [], []
     for num, input_path in enumerate(inputs, 1):
-        progress(num / len(inputs), desc=f"[{num}/{len(inputs)}] {os.path.basename(input_path)}")
+        progress(
+            num / len(inputs),
+            desc=f"[{num}/{len(inputs)}] {os.path.basename(input_path)}",
+        )
         try:
-            output_path = build_output_path(input_path, target_dir, rvc_model, output_format)
+            output_path = build_output_path(
+                input_path, target_dir, rvc_model, output_format
+            )
             convert_one(
                 pipe,
                 input_path,
@@ -449,7 +509,9 @@ def rvc_edgetts_infer(
 
     display_progress(1.0, "[🎙️] Синтезируем речь...", False)
     input_path = os.path.join(OUTPUT_DIR, "TTS_Voice.wav")
-    asyncio.run(text_to_speech(tts_voice, tts_text, tts_rate, tts_volume, tts_pitch, input_path))
+    asyncio.run(
+        text_to_speech(tts_voice, tts_text, tts_rate, tts_volume, tts_pitch, input_path)
+    )
 
     output_path = rvc_infer(
         rvc_model=rvc_model,

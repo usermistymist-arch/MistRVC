@@ -29,7 +29,9 @@ class MultiPeriodDiscriminator(torch.nn.Module):
 
         self.checkpointing = checkpointing
         self.discriminators = torch.nn.ModuleList(
-            [DiscriminatorS()] + [DiscriminatorP(p) for p in periods] + [DiscriminatorR(r) for r in resolutions],
+            [DiscriminatorS()]
+            + [DiscriminatorP(p) for p in periods]
+            + [DiscriminatorR(r) for r in resolutions],
         )
 
     def forward(self, y, y_hat):
@@ -119,7 +121,9 @@ class DiscriminatorP(torch.nn.Module):
             ],
         )
 
-        self.conv_post = weight_norm(torch.nn.Conv2d(1024, 1, (3, 1), 1, padding=(1, 0)))
+        self.conv_post = weight_norm(
+            torch.nn.Conv2d(1024, 1, (3, 1), 1, padding=(1, 0))
+        )
         self.lrelu = torch.nn.LeakyReLU(LRELU_SLOPE)
 
     def forward(self, x):
@@ -149,9 +153,15 @@ class DiscriminatorR(torch.nn.Module):
         self.convs = torch.nn.ModuleList(
             [
                 weight_norm(torch.nn.Conv2d(1, 32, (3, 9), padding=(1, 4))),
-                weight_norm(torch.nn.Conv2d(32, 32, (3, 9), stride=(1, 2), padding=(1, 4))),
-                weight_norm(torch.nn.Conv2d(32, 32, (3, 9), stride=(1, 2), padding=(1, 4))),
-                weight_norm(torch.nn.Conv2d(32, 32, (3, 9), stride=(1, 2), padding=(1, 4))),
+                weight_norm(
+                    torch.nn.Conv2d(32, 32, (3, 9), stride=(1, 2), padding=(1, 4))
+                ),
+                weight_norm(
+                    torch.nn.Conv2d(32, 32, (3, 9), stride=(1, 2), padding=(1, 4))
+                ),
+                weight_norm(
+                    torch.nn.Conv2d(32, 32, (3, 9), stride=(1, 2), padding=(1, 4))
+                ),
                 weight_norm(torch.nn.Conv2d(32, 32, (3, 3), padding=(1, 1))),
             ],
         )

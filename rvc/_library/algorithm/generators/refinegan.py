@@ -228,7 +228,9 @@ class SineGenerator(nn.Module):
         rad_values = (f0_values / self.sampling_rate) % 1
 
         # initial phase noise (no noise for fundamental component)
-        rand_ini = torch.rand(f0_values.shape[0], f0_values.shape[2], device=f0_values.device)
+        rand_ini = torch.rand(
+            f0_values.shape[0], f0_values.shape[2], device=f0_values.device
+        )
         rand_ini[:, 0] = 0
         rad_values[:, 0, :] = rad_values[:, 0, :] + rand_ini
 
@@ -333,7 +335,9 @@ class RefineGANGenerator(nn.Module):
             size = new_size
 
             new_channels = channels * 2
-            self.downsample_blocks.append(weight_norm(nn.Conv1d(channels, new_channels, 7, 1, padding=3)))
+            self.downsample_blocks.append(
+                weight_norm(nn.Conv1d(channels, new_channels, 7, 1, padding=3))
+            )
             channels = new_channels
 
         # mel handling
@@ -374,7 +378,9 @@ class RefineGANGenerator(nn.Module):
 
             channels = new_channels
 
-        self.conv_post = weight_norm(nn.Conv1d(channels, 1, 7, 1, padding=3, bias=False))
+        self.conv_post = weight_norm(
+            nn.Conv1d(channels, 1, 7, 1, padding=3, bias=False)
+        )
         self.conv_post.apply(init_weights)
 
     def forward(self, mel: torch.Tensor, f0: torch.Tensor, g: torch.Tensor = None):

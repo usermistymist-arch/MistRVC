@@ -1,9 +1,61 @@
 target-version = "py313"
-line-length = 140
-preview = false
-
-# Справочные блокноты других проектов в assets/ — не код проекта, не линтуем.
-exclude = ["assets/*.ipynb"]
 
 [lint]
-select = ["ALL"]
+select = [
+    "E",    # pycodestyle errors
+    "W",    # pycodestyle warnings
+    "F",    # pyflakes (неиспользуемые импорты, undefined names)
+    "I",    # isort (сортировка импортов)
+    "UP",   # pyupgrade (устаревший синтаксис)
+    "B",    # flake8-bugbear (частые баги)
+    "SIM",  # flake8-simplify (упрощение кода)
+]
+ignore = [
+    "E402", # module level import not at top of file (нужно после sys.path.append)
+    "E501", # line too long (форматтер сам разберётся)
+    "E741", # ambiguous variable name 'l' (допустимо в математическом коде)
+    "B006", # mutable default args (часто нужно в ML)
+    "B008", # function call in argument defaults (gr.Progress() — идиома Gradio)
+    "B904", # raise ... from err (стилистическое)
+    "B905", # zip() without strict (в ML-коде часто намеренно)
+    "T201", # print found (нужен в CLI-скриптах)
+    "BLE001", # blind except (иногда необходим для перехвата любых ошибок)
+    "SIM108", # use ternary operator (стилистическое)
+    "SIM117", # use single with statement (стилистическое)
+    "SIM105", # use contextlib.suppress (стилистическое)
+    "PLR0913", # too many arguments (в ML-функциях часто много параметров)
+    "PLR0917", # too many positional arguments (то же самое)
+    "PLR2004", # magic value used in comparison (в ML много констант)
+    "ANN", # type annotations (не требуем пока)
+    "D", # docstrings (не требуем пока)
+    "CPY", # copyright notice (не требуется)
+    "INP", # implicit namespace package (не критично)
+    "PTH", # use pathlib (os.path тоже ок)
+    "TRY", # try-except style (стилистическое)
+    "EM", # exception messages (стилистическое)
+    "FBT", # boolean default args (допустимо)
+    "RET", # return style (стилистическое)
+    "PERF", # performance suggestions (не критично)
+    "C4", # comprehensions (стилистическое)
+    "S", # security (не критично для локального инструмента)
+    "ARG", # unused arguments (иногда необходимо для интерфейса)
+    "PLW", # pylint warnings (стилистическое)
+    "PLC", # pylint conventions (стилистическое)
+    "C901", # too complex (ML-код часто сложный)
+    "N", # naming conventions (стилистическое)
+    "ICN", # import conventions (стилистическое)
+    "RUF", # ruff-specific rules (включая проверку кириллицы)
+	"SIM115", # context manager for open() (не нужно для логов в subprocess)
+    "SIM102", # nested if statements (стилистическое)
+    "SIM118", # key in dict.keys() (стилистическое)
+    "E712",   # comparison to False (стилистическое)
+    "B007",   # unused loop variable (стилистическое)
+    "UP022",  # capture_output (стилистическое)
+    "B023",   # function definition in loop (намеренно в fairseq)
+    "E722",   # bare except (перехватывает любую ошибку с подробным сообщением)
+    "B020",   # loop variable overrides iterable (намеренно в preprocess)
+]
+
+[format]
+quote-style = "double"
+indent-style = "space"

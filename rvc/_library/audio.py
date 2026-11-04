@@ -6,7 +6,9 @@ from functools import lru_cache
 import numpy as np
 
 FFMPEG = "ffmpeg"
-PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+PROJECT_ROOT = os.path.dirname(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+)
 
 SOXR_RESAMPLER = "resampler=soxr:precision=28"
 SWR_RESAMPLER = "filter_size=128"
@@ -52,7 +54,9 @@ def resampler_options() -> str:
         "-",
     ]
     try:
-        result = subprocess.run(probe, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False)
+        result = subprocess.run(
+            probe, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False
+        )
     except OSError:
         return SWR_RESAMPLER
 
@@ -61,12 +65,18 @@ def resampler_options() -> str:
 
 def _ffmpeg_not_found() -> RuntimeError:
     """Одна и та же подсказка для чтения и записи: без FFmpeg не работает ни то ни другое."""
-    return RuntimeError(f"FFmpeg не найден: установите его или положите '{FFMPEG}' в каталог проекта.")
+    return RuntimeError(
+        f"FFmpeg не найден: установите его или положите '{FFMPEG}' в каталог проекта."
+    )
 
 
 def _ffmpeg_failure(process: subprocess.CompletedProcess, file: str) -> str:
     """Собирает сообщение об ошибке из stderr FFmpeg — без него причина отказа не видна."""
-    lines = [line.strip() for line in process.stderr.decode(errors="replace").splitlines() if line.strip()]
+    lines = [
+        line.strip()
+        for line in process.stderr.decode(errors="replace").splitlines()
+        if line.strip()
+    ]
     return f"FFmpeg не смог обработать '{file}': {lines[-1] if lines else f'код возврата {process.returncode}'}"
 
 
@@ -98,11 +108,19 @@ def load_audio(file: str, sample_rate: int) -> np.ndarray:
     ]
 
     try:
-        process = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=LOAD_TIMEOUT, check=False)
+        process = subprocess.run(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            timeout=LOAD_TIMEOUT,
+            check=False,
+        )
     except FileNotFoundError as error:
         raise _ffmpeg_not_found() from error
     except subprocess.TimeoutExpired as error:
-        raise RuntimeError(f"FFmpeg не уложился в {LOAD_TIMEOUT} с при чтении '{file}'.") from error
+        raise RuntimeError(
+            f"FFmpeg не уложился в {LOAD_TIMEOUT} с при чтении '{file}'."
+        ) from error
 
     if process.returncode != 0:
         raise RuntimeError(_ffmpeg_failure(process, file))
@@ -220,10 +238,14 @@ def save_audio(
     except subprocess.TimeoutExpired:
         process.kill()
         process.communicate()
-        raise RuntimeError(f"FFmpeg не уложился в {SAVE_TIMEOUT} с при записи '{output_path}'") from None
+        raise RuntimeError(
+            f"FFmpeg не уложился в {SAVE_TIMEOUT} с при записи '{output_path}'"
+        ) from None
 
     if process.returncode != 0:
         detail = stderr.decode(errors="replace").strip().splitlines()
-        raise RuntimeError(f"FFmpeg не смог записать '{output_path}': {detail[-1] if detail else process.returncode}")
+        raise RuntimeError(
+            f"FFmpeg не смог записать '{output_path}': {detail[-1] if detail else process.returncode}"
+        )
 
     return output_path

@@ -66,7 +66,9 @@ class WaveNet(torch.nn.Module):
                 ),
             )
 
-            res_skip_channels = hidden_channels if i == n_layers - 1 else 2 * hidden_channels
+            res_skip_channels = (
+                hidden_channels if i == n_layers - 1 else 2 * hidden_channels
+            )
             self.res_skip_layers.append(
                 torch.nn.utils.parametrizations.weight_norm(
                     torch.nn.Conv1d(hidden_channels, res_skip_channels, 1),

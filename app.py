@@ -9,7 +9,9 @@ import torch
 
 # Configuring the environment and logging
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"  # Disable unnecessary TensorFlow logs
-os.environ["TF_ENABLE_ONEDNN_OPTS"] = "0"  # TensorFlow сам не используется, но подтягивается TensorBoard'ом
+os.environ["TF_ENABLE_ONEDNN_OPTS"] = (
+    "0"  # TensorFlow сам не используется, но подтягивается TensorBoard'ом
+)
 os.environ["GRADIO_ANALYTICS_ENABLED"] = "False"  # Disabling Gradio analytics
 logging.basicConfig(level=logging.WARNING)  # Disable all logs, except WARNING and above
 warnings.filterwarnings("ignore")  # Disable all warnings
@@ -26,7 +28,12 @@ import gradio as gr
 from assets.model_installer import check_and_install_models
 from assets.notebook_check import colab_check, kaggle_check
 from assets.version import __version__, __version_info__
-from gradio_ui.common import UVR_MODELS_DIR, UVR_OUTPUT_DIR, model_dropdowns, refresh_models
+from gradio_ui.common import (
+    UVR_MODELS_DIR,
+    UVR_OUTPUT_DIR,
+    model_dropdowns,
+    refresh_models,
+)
 from gradio_ui.inference import conversion_tab
 from gradio_ui.models import models_tab
 from gradio_ui.tools import tools_tab
@@ -117,7 +124,9 @@ with gr.Blocks(
             uvr_ui(UVR_MODELS_DIR, UVR_OUTPUT_DIR)
         else:
             gr.HTML(f"<center><h2>{uvr_message}</h2></center>")
-            gr.Code(value=uvr_error, language="python", interactive=False, show_label=False)
+            gr.Code(
+                value=uvr_error, language="python", interactive=False, show_label=False
+            )
 
     with gr.Tab("Модели"):
         models_tab(is_offline_mode())
@@ -148,7 +157,10 @@ def get_value_from_args(key: str, default: Any = None) -> Any:
 
 
 if __name__ == "__main__":
-    print("Среда запуска: ", "Jupyter Notebook" if RUN_FROM_JUPYTER_NOTEBOOKS else "LocalHost")
+    print(
+        "Среда запуска: ",
+        "Jupyter Notebook" if RUN_FROM_JUPYTER_NOTEBOOKS else "LocalHost",
+    )
 
     # Красивый вывод версии
     print(f"\n╔{'═' * 42}╗")
@@ -175,7 +187,9 @@ if __name__ == "__main__":
             launch_gradio(server, port)
             break
         except OSError:
-            print(f"Не удалось запустить на порту {port}, повторите попытку на порту {port - 1}...")
+            print(
+                f"Не удалось запустить на порту {port}, повторите попытку на порту {port - 1}..."
+            )
             port -= 1
         except Exception as error:
             print(f"Произошла ошибка при запуске Gradio: {error}")

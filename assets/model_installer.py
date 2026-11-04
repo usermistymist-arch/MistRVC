@@ -5,10 +5,19 @@ import requests
 from tqdm import tqdm
 
 from assets.pretrains import BASE_URL as PRETRAINS_BASE_URL
-from assets.pretrains import NO_PRETRAIN, has_pretrains, pretrain_files, pretrain_rates, pretrain_sets, rate_label
+from assets.pretrains import (
+    NO_PRETRAIN,
+    has_pretrains,
+    pretrain_files,
+    pretrain_rates,
+    pretrain_sets,
+    rate_label,
+)
 
 PREDICTORS = "https://huggingface.co/Politrees/RVC_resources/resolve/main/predictors/"
-EMBEDDERS = "https://huggingface.co/Politrees/RVC_resources/resolve/main/embedders/pytorch/"
+EMBEDDERS = (
+    "https://huggingface.co/Politrees/RVC_resources/resolve/main/embedders/pytorch/"
+)
 FLASH_SR = "https://huggingface.co/datasets/jakeoneijk/FlashSR_weights/resolve/main/"
 
 # Корень репозитория, а не текущий каталог: обучение идёт в подпроцессах с cwd = корень.
@@ -105,9 +114,13 @@ def ensure_pretrains(vocoder, choice, sample_rate):
     """
     rate = rate_label(sample_rate)
     if not has_pretrains(vocoder):
-        raise ValueError(f"У вокодера «{vocoder}» нет встроенных претрейнов — выберите «{NO_PRETRAIN}» или укажите свои G/D.")
+        raise ValueError(
+            f"У вокодера «{vocoder}» нет встроенных претрейнов — выберите «{NO_PRETRAIN}» или укажите свои G/D."
+        )
     if choice not in pretrain_sets(vocoder):
-        raise ValueError(f"Претрейн «{choice}» несовместим с вокодером «{vocoder}»: наборы привязаны к архитектуре генератора.")
+        raise ValueError(
+            f"Претрейн «{choice}» несовместим с вокодером «{vocoder}»: наборы привязаны к архитектуре генератора."
+        )
     files = pretrain_files(vocoder, choice, sample_rate)
     if files is None:
         rates = ", ".join(pretrain_rates(vocoder, choice))

@@ -74,7 +74,9 @@ class Synthesizer(torch.nn.Module):
         )
 
         if vocoder == "MRF HiFi-GAN":
-            from rvc._library.algorithm.generators.hifigan_mrf import HiFiGANMRFGenerator
+            from rvc._library.algorithm.generators.hifigan_mrf import (
+                HiFiGANMRFGenerator,
+            )
 
             self.dec = HiFiGANMRFGenerator(
                 in_channel=inter_channels,
@@ -100,7 +102,9 @@ class Synthesizer(torch.nn.Module):
                 checkpointing=checkpointing,
             )
         else:
-            from rvc._library.algorithm.generators.hifigan_nsf import HiFiGANNSFGenerator
+            from rvc._library.algorithm.generators.hifigan_nsf import (
+                HiFiGANNSFGenerator,
+            )
 
             self.dec = HiFiGANNSFGenerator(
                 inter_channels,
@@ -163,7 +167,9 @@ class Synthesizer(torch.nn.Module):
             z_p = self.flow(z, y_mask, g=g)
             # regular old training method using random slices
             if self.randomized:
-                z_slice, ids_slice = rand_slice_segments(z, y_lengths, self.segment_size)
+                z_slice, ids_slice = rand_slice_segments(
+                    z, y_lengths, self.segment_size
+                )
                 pitchf = slice_segments(pitchf, ids_slice, self.segment_size, 2)
                 o = self.dec(z_slice, pitchf, g=g)
                 return o, ids_slice, x_mask, y_mask, (z, z_p, m_p, logs_p, m_q, logs_q)

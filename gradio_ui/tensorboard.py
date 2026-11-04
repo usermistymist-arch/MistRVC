@@ -61,10 +61,15 @@ def _force_tensorboard_stub() -> None:
     notf_path = Path(tensorboard.__file__).parent / "compat" / "notf.py"
     try:
         if not notf_path.exists():
-            notf_path.write_text("# Force tensorflow_stub: MuXVS does not use TensorFlow.\n", encoding="utf-8")
+            notf_path.write_text(
+                "# Force tensorflow_stub: MuXVS does not use TensorFlow.\n",
+                encoding="utf-8",
+            )
     except OSError:
         module = types.ModuleType("tensorboard.compat.notf")
-        module.__spec__ = importlib.machinery.ModuleSpec("tensorboard.compat.notf", loader=None)
+        module.__spec__ = importlib.machinery.ModuleSpec(
+            "tensorboard.compat.notf", loader=None
+        )
         sys.modules.setdefault("tensorboard.compat.notf", module)
 
 
@@ -86,7 +91,17 @@ def launch_tensorboard(logs_dir: str, port: int = DEFAULT_TENSORBOARD_PORT) -> s
             from tensorboard import program
 
             board = program.TensorBoard()
-            board.configure(argv=[None, "--logdir", logs_dir, "--port", str(port), "--path_prefix", "/tensorboard"])
+            board.configure(
+                argv=[
+                    None,
+                    "--logdir",
+                    logs_dir,
+                    "--port",
+                    str(port),
+                    "--path_prefix",
+                    "/tensorboard",
+                ]
+            )
             url = board.launch()
         except Exception as error:
             return f"Ошибка запуска TensorBoard: {error}"

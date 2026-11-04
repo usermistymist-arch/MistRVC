@@ -38,6 +38,8 @@ def require_training_logs_dir() -> str:
     """Корень экспериментов для действий: проверяет Drive и создаёт папку."""
     path = training_logs_dir()
     if colab_check() and not is_colab_drive_mounted():
-        raise RuntimeError("Google Drive не подключён: выполните drive.mount('/content/drive') в блокноте и повторите.")
+        raise RuntimeError(
+            "Google Drive не подключён: выполните drive.mount('/content/drive') в блокноте и повторите."
+        )
     os.makedirs(path, exist_ok=True)
     return path

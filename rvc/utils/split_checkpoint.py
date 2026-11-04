@@ -37,15 +37,13 @@ def split_checkpoint(checkpoint_path: str, output_dir: str):
 
     print(f"Загрузка чекпоинта: {checkpoint_path}")
 
-    try:
-        checkpoint = torch.load(checkpoint_path, map_location="cpu", weights_only=True)
-    except Exception:
-        print("Загрузка в небезопасном режиме...")
-        checkpoint = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
+    checkpoint = torch.load(checkpoint_path, map_location="cpu", weights_only=True)
 
     # Проверка формата
     if "generator" not in checkpoint or "discriminator" not in checkpoint:
-        raise ValueError("Файл не является единым чекпоинтом: нужны ключи 'generator' и 'discriminator'.")
+        raise ValueError(
+            "Файл не является единым чекпоинтом: нужны ключи 'generator' и 'discriminator'."
+        )
 
     epoch = checkpoint.get("epoch", 0)
     learning_rate = checkpoint.get("learning_rate", 1e-4)
@@ -90,8 +88,14 @@ def main():
             - python split_checkpoint.py checkpoint.pth .
         """,
     )
-    parser.add_argument("checkpoint_path", type=str, help="Путь к единому чекпоинту (checkpoint.pth)")
-    parser.add_argument("output_dir", type=str, help="Папка для сохранения G_pretrain.pth и D_pretrain.pth")
+    parser.add_argument(
+        "checkpoint_path", type=str, help="Путь к единому чекпоинту (checkpoint.pth)"
+    )
+    parser.add_argument(
+        "output_dir",
+        type=str,
+        help="Папка для сохранения G_pretrain.pth и D_pretrain.pth",
+    )
 
     args = parser.parse_args()
     split_checkpoint(args.checkpoint_path, args.output_dir)

@@ -9,15 +9,23 @@ from scipy import signal
 from scipy.io import wavfile
 from tqdm import tqdm
 
-sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))))
+sys.path.append(
+    os.path.dirname(
+        os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    )
+)
 from rvc._library.audio import load_audio
 from rvc.training.preprocess.slicer import Slicer
 
 # Парсинг аргументов командной строки
 exp_dir = sys.argv[1]  # Директория для сохранения результатов
 input_root = sys.argv[2]  # Директория с входными аудиофайлами
-percentage = float(sys.argv[3])  # Максимальная длина сегмента в секундах / По умолчанию = 3.0 (от n до 3сек)
-sample_rate = int(sys.argv[4])  # Частота дискретизации в которую преобразуются данные / 32000, 40000 и 48000
+percentage = float(
+    sys.argv[3]
+)  # Максимальная длина сегмента в секундах / По умолчанию = 3.0 (от n до 3сек)
+sample_rate = int(
+    sys.argv[4]
+)  # Частота дискретизации в которую преобразуются данные / 32000, 40000 и 48000
 normalize = sys.argv[5] == "True"  # Флаг для включения/выключения нормализации
 
 # Поддерживаемые аудио-расширения
@@ -40,7 +48,9 @@ AUDIO_EXTENSIONS = {
 
 
 def is_audio_file(path):
-    return os.path.isfile(path) and os.path.splitext(path)[1].lower() in AUDIO_EXTENSIONS
+    return (
+        os.path.isfile(path) and os.path.splitext(path)[1].lower() in AUDIO_EXTENSIONS
+    )
 
 
 class Postfix:
@@ -72,7 +82,9 @@ class PreProcess:
             max_sil_kept=500,
         )
         self.sample_rate = sample_rate  # Частота дискретизации
-        self.b_high, self.a_high = signal.butter(N=5, Wn=48, btype="high", fs=self.sample_rate)  # Фильтр высоких частот
+        self.b_high, self.a_high = signal.butter(
+            N=5, Wn=48, btype="high", fs=self.sample_rate
+        )  # Фильтр высоких частот
         self.percentage = percentage  # Длина сегмента
         self.overlap = 0.3  # Перекрытие между сегментами
         self.tail = self.percentage + self.overlap  # Хвост для обработки
@@ -82,21 +94,37 @@ class PreProcess:
         if self.normalize:
             tmp_max = np.abs(tmp_audio).max()
             if tmp_max > 0:
-                tmp_audio = (tmp_audio / tmp_max * (0.9 * 0.75)) + (1 - 0.75) * tmp_audio
+                tmp_audio = (tmp_audio / tmp_max * (0.9 * 0.75)) + (
+                    1 - 0.75
+                ) * tmp_audio
                 peak = np.abs(tmp_audio).max()
                 if peak > 1.0:
                     tmp_audio = tmp_audio * (1.0 / peak)
 
-        wavfile.write(f"{self.gt_wavs_dir}/{idx0}_{idx1}.wav", self.sample_rate, tmp_audio.astype(np.float32))
+        wavfile.write(
+            f"{self.gt_wavs_dir}/{idx0}_{idx1}.wav",
+            self.sample_rate,
+            tmp_audio.astype(np.float32),
+        )
         # 16 кГц-двойник для F0/HuBERT: ресемпл один раз здесь, а не на каждый проход признаков
-        tmp_audio_16k = librosa.resample(tmp_audio, orig_sr=self.sample_rate, target_sr=16000, res_type="soxr_vhq")
-        wavfile.write(f"{self.wavs16k_dir}/{idx0}_{idx1}.wav", 16000, tmp_audio_16k.astype(np.float32))
+        tmp_audio_16k = librosa.resample(
+            tmp_audio, orig_sr=self.sample_rate, target_sr=16000, res_type="soxr_vhq"
+        )
+        wavfile.write(
+            f"{self.wavs16k_dir}/{idx0}_{idx1}.wav",
+            16000,
+            tmp_audio_16k.astype(np.float32),
+        )
         return 1  # Сегмент записан
 
     def pipeline_inp_dir(self, input_root):
         try:
             # Собираем только аудиофайлы; всё остальное в папке датасета игнорируем
-            names = sorted(name for name in os.listdir(input_root) if is_audio_file(os.path.join(input_root, name)))
+            names = sorted(
+                name
+                for name in os.listdir(input_root)
+                if is_audio_file(os.path.join(input_root, name))
+            )
             if not names:
                 raise FileNotFoundError(
                     f"В папке '{input_root}' не найдено ни одного аудиофайла (поддерживаются: {', '.join(sorted(AUDIO_EXTENSIONS))}).",
@@ -128,23 +156,36 @@ class PreProcess:
                             i = 0
                             while True:
                                 # Вычисление начальной точки сегмента
-                                start = int(self.sample_rate * (self.percentage - self.overlap) * i)
+                                start = int(
+                                    self.sample_rate
+                                    * (self.percentage - self.overlap)
+                                    * i
+                                )
                                 i += 1
                                 # Проверка, остался ли хвост аудио
                                 if len(audio[start:]) > self.tail * self.sample_rate:
-                                    tmp_audio = audio[start : start + int(self.percentage * self.sample_rate)]
-                                    total_segments += self.norm_write(tmp_audio, idx, idx1)
+                                    tmp_audio = audio[
+                                        start : start
+                                        + int(self.percentage * self.sample_rate)
+                                    ]
+                                    total_segments += self.norm_write(
+                                        tmp_audio, idx, idx1
+                                    )
                                     idx1 += 1
                                     # Перерисовываем счетчик не чаще ~10 раз в секунду:
                                     # чаще — терминал не успевает и число в конце файла прыгает
                                     if time.monotonic() - last_paint >= 0.1:
                                         last_paint = time.monotonic()
-                                        pbar.postfix = Postfix(f" [сегментов: {total_segments}]")
+                                        pbar.postfix = Postfix(
+                                            f" [сегментов: {total_segments}]"
+                                        )
                                         pbar.refresh()
                                 else:
                                     tmp_audio = audio[start:]
                                     if len(tmp_audio) > 0:  # Пустой хвост не записываем
-                                        total_segments += self.norm_write(tmp_audio, idx, idx1)
+                                        total_segments += self.norm_write(
+                                            tmp_audio, idx, idx1
+                                        )
                                         idx1 += 1
                                     break
                     except Exception:

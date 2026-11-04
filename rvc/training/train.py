@@ -26,18 +26,44 @@ from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm
 
-sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+sys.path.append(
+    os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+)
 from rvc._library.algorithm.commons import grad_norm, slice_segments
 from rvc._library.algorithm.discriminators import MultiPeriodDiscriminator
 from rvc._library.algorithm.synthesizers import Synthesizer
-from rvc.training.losses import discriminator_loss, feature_loss, generator_loss, kl_loss
-from rvc.training.mel_processing import MultiScaleMelSpectrogramLoss, mel_spectrogram_torch, spec_to_mel_torch
-from rvc.training.utils.data_utils import DistributedBucketSampler, TextAudioCollateMultiNSFsid, TextAudioLoaderMultiNSFsid
-from rvc.training.utils.train_utils import HParams, extract_model, load_checkpoint, save_checkpoint
-from rvc.training.visualization import f0_error_cents, mel_spectrogram_similarity, plot_spectrogram_to_numpy
+from rvc.training.losses import (
+    discriminator_loss,
+    feature_loss,
+    generator_loss,
+    kl_loss,
+)
+from rvc.training.mel_processing import (
+    MultiScaleMelSpectrogramLoss,
+    mel_spectrogram_torch,
+    spec_to_mel_torch,
+)
+from rvc.training.utils.data_utils import (
+    DistributedBucketSampler,
+    TextAudioCollateMultiNSFsid,
+    TextAudioLoaderMultiNSFsid,
+)
+from rvc.training.utils.train_utils import (
+    HParams,
+    extract_model,
+    load_checkpoint,
+    save_checkpoint,
+)
+from rvc.training.visualization import (
+    f0_error_cents,
+    mel_spectrogram_similarity,
+    plot_spectrogram_to_numpy,
+)
 
 torch.backends.cudnn.deterministic = False
-if os.name == "nt":  # Включение только на Windows (в Kaggle и Colab снижает производительность)
+if (
+    os.name == "nt"
+):  # Включение только на Windows (в Kaggle и Colab снижает производительность)
     torch.backends.cudnn.benchmark = True
 
 # Настройки TF32, в некоторых случаях должны повысить производительность
@@ -60,16 +86,34 @@ def get_hparams():
     parser.add_argument("--experiment_dir", type=str, required=True)
     parser.add_argument("--model_name", type=str, required=True)
     parser.add_argument("--total_epoch", type=int, choices=range(1, 10001), default=300)
-    parser.add_argument("--save_every_epoch", type=int, choices=range(1, 101), default=25)
+    parser.add_argument(
+        "--save_every_epoch", type=int, choices=range(1, 101), default=25
+    )
     parser.add_argument("--batch_size", type=int, choices=range(1, 129), default=8)
-    parser.add_argument("--sample_rate", type=int, choices=[32000, 40000, 48000], default=48000)
-    parser.add_argument("--vocoder", type=str, choices=["HiFi-GAN", "MRF HiFi-GAN", "RefineGAN"], default="HiFi-GAN")
-    parser.add_argument("--optimizer", type=str, choices=["AdamW", "AdaBelief", "PolOpt"], default="AdamW")
+    parser.add_argument(
+        "--sample_rate", type=int, choices=[32000, 40000, 48000], default=48000
+    )
+    parser.add_argument(
+        "--vocoder",
+        type=str,
+        choices=["HiFi-GAN", "MRF HiFi-GAN", "RefineGAN"],
+        default="HiFi-GAN",
+    )
+    parser.add_argument(
+        "--optimizer",
+        type=str,
+        choices=["AdamW", "AdaBelief", "PolOpt"],
+        default="AdamW",
+    )
     parser.add_argument("--pretrain_g", type=str, default=None)
     parser.add_argument("--pretrain_d", type=str, default=None)
     parser.add_argument("--gpus", type=str, default="0")
-    parser.add_argument("--save_to_zip", type=_strtobool, choices=[True, False], default=False)
-    parser.add_argument("--save_half", type=_strtobool, choices=[True, False], default=True)
+    parser.add_argument(
+        "--save_to_zip", type=_strtobool, choices=[True, False], default=False
+    )
+    parser.add_argument(
+        "--save_half", type=_strtobool, choices=[True, False], default=True
+    )
     args = parser.parse_args()
 
     experiment_dir = os.path.join(args.experiment_dir, args.model_name)
@@ -153,7 +197,11 @@ def main():
     os.environ["MASTER_PORT"] = str(randint(20000, 55555))
 
     device = torch.device(
-        "cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu",
+        "cuda"
+        if torch.cuda.is_available()
+        else "mps"
+        if torch.backends.mps.is_available()
+        else "cpu",
     )
     gpus = [int(item) for item in hps.gpus.split("-")] if device.type == "cuda" else [0]
     n_gpus = len(gpus)
@@ -183,11 +231,17 @@ def run(hps, rank, n_gpus, device, device_id):
     global global_step
 
     try:
-        writer_eval = SummaryWriter(log_dir=os.path.join(hps.model_dir, "eval")) if rank == 0 else None
+        writer_eval = (
+            SummaryWriter(log_dir=os.path.join(hps.model_dir, "eval"))
+            if rank == 0
+            else None
+        )
         fn_mel_loss = MultiScaleMelSpectrogramLoss(sample_rate=hps.data.sample_rate)
 
         dist.init_process_group(
-            backend="gloo" if sys.platform == "win32" or device.type != "cuda" else "nccl",
+            backend="gloo"
+            if sys.platform == "win32" or device.type != "cuda"
+            else "nccl",
             init_method="env://",
             world_size=n_gpus if device.type == "cuda" else 1,
             rank=rank if device.type == "cuda" else 0,
@@ -238,8 +292,18 @@ def run(hps, rank, n_gpus, device, device_id):
         if hps.optimizer == "AdaBelief":
             from rvc._library.optimizers.AdaBelief import AdaBelief
 
-            optim_g = AdaBelief(net_g.parameters(), lr=hps.train.learning_rate, betas=hps.train.betas, eps=1e-8)
-            optim_d = AdaBelief(net_d.parameters(), lr=hps.train.learning_rate, betas=hps.train.betas, eps=1e-8)
+            optim_g = AdaBelief(
+                net_g.parameters(),
+                lr=hps.train.learning_rate,
+                betas=hps.train.betas,
+                eps=1e-8,
+            )
+            optim_d = AdaBelief(
+                net_d.parameters(),
+                lr=hps.train.learning_rate,
+                betas=hps.train.betas,
+                eps=1e-8,
+            )
         elif hps.optimizer == "PolOpt":
             from rvc._library.optimizers.PolOpt import PolOpt
 
@@ -260,8 +324,18 @@ def run(hps, rank, n_gpus, device, device_id):
                 max_step_clip=1.0,
             )
         else:
-            optim_g = torch.optim.AdamW(net_g.parameters(), hps.train.learning_rate, betas=hps.train.betas, eps=hps.train.eps)
-            optim_d = torch.optim.AdamW(net_d.parameters(), hps.train.learning_rate, betas=hps.train.betas, eps=hps.train.eps)
+            optim_g = torch.optim.AdamW(
+                net_g.parameters(),
+                hps.train.learning_rate,
+                betas=hps.train.betas,
+                eps=hps.train.eps,
+            )
+            optim_d = torch.optim.AdamW(
+                net_d.parameters(),
+                hps.train.learning_rate,
+                betas=hps.train.betas,
+                eps=hps.train.eps,
+            )
 
         if n_gpus > 1 and device.type == "cuda":
             net_g = DDP(net_g, device_ids=[device_id])
@@ -272,7 +346,9 @@ def run(hps, rank, n_gpus, device, device_id):
         checkpoint_path = os.path.join(hps.model_dir, "checkpoint.pth")
         if os.path.exists(checkpoint_path):
             try:
-                epoch_str = load_checkpoint(checkpoint_path, net_g, optim_g, net_d, optim_d)
+                epoch_str = load_checkpoint(
+                    checkpoint_path, net_g, optim_g, net_d, optim_d
+                )
             except Exception as e:
                 print(f"Ошибка загрузки checkpoint.pth:\n{e}", flush=True)
 
@@ -286,31 +362,44 @@ def run(hps, rank, n_gpus, device, device_id):
             # Загрузка претрейнов если чекпоинт не найден
             if hps.pretrain_g not in ("", "None", None):
                 if rank == 0:
-                    print(f"Загрузка претрейна генератора: '{hps.pretrain_g}'", flush=True)
+                    print(
+                        f"Загрузка претрейна генератора: '{hps.pretrain_g}'", flush=True
+                    )
                 g_model = net_g.module if hasattr(net_g, "module") else net_g
-                try:
-                    g_model.load_state_dict(torch.load(hps.pretrain_g, map_location="cpu", weights_only=True)["model"])
-                except Exception:
-                    print("Загрузка претрейна генератора в небезопасном режиме...", flush=True)
-                    g_model.load_state_dict(torch.load(hps.pretrain_g, map_location="cpu", weights_only=False)["model"])
+                g_model.load_state_dict(
+                    torch.load(hps.pretrain_g, map_location="cpu", weights_only=True)[
+                        "model"
+                    ]
+                )
 
             if hps.pretrain_d not in ("", "None", None):
                 if rank == 0:
-                    print(f"Загрузка претрейна дискриминатора: '{hps.pretrain_d}'", flush=True)
+                    print(
+                        f"Загрузка претрейна дискриминатора: '{hps.pretrain_d}'",
+                        flush=True,
+                    )
                 d_model = net_d.module if hasattr(net_d, "module") else net_d
-                try:
-                    d_model.load_state_dict(torch.load(hps.pretrain_d, map_location="cpu", weights_only=True)["model"])
-                except Exception:
-                    print("Загрузка претрейна дискриминатора в небезопасном режиме...", flush=True)
-                    d_model.load_state_dict(torch.load(hps.pretrain_d, map_location="cpu", weights_only=False)["model"])
+                d_model.load_state_dict(
+                    torch.load(hps.pretrain_d, map_location="cpu", weights_only=True)[
+                        "model"
+                    ]
+                )
 
         # Настройка scheduler
         if hps.optimizer in ("AdaBelief", "PolOpt"):
-            scheduler_g = torch.optim.lr_scheduler.CosineAnnealingLR(optim_g, T_max=hps.total_epoch, eta_min=1e-6, last_epoch=epoch_str - 2)
-            scheduler_d = torch.optim.lr_scheduler.CosineAnnealingLR(optim_d, T_max=hps.total_epoch, eta_min=1e-6, last_epoch=epoch_str - 2)
+            scheduler_g = torch.optim.lr_scheduler.CosineAnnealingLR(
+                optim_g, T_max=hps.total_epoch, eta_min=1e-6, last_epoch=epoch_str - 2
+            )
+            scheduler_d = torch.optim.lr_scheduler.CosineAnnealingLR(
+                optim_d, T_max=hps.total_epoch, eta_min=1e-6, last_epoch=epoch_str - 2
+            )
         else:
-            scheduler_g = torch.optim.lr_scheduler.ExponentialLR(optim_g, gamma=hps.train.lr_decay, last_epoch=epoch_str - 2)
-            scheduler_d = torch.optim.lr_scheduler.ExponentialLR(optim_d, gamma=hps.train.lr_decay, last_epoch=epoch_str - 2)
+            scheduler_g = torch.optim.lr_scheduler.ExponentialLR(
+                optim_g, gamma=hps.train.lr_decay, last_epoch=epoch_str - 2
+            )
+            scheduler_d = torch.optim.lr_scheduler.ExponentialLR(
+                optim_d, gamma=hps.train.lr_decay, last_epoch=epoch_str - 2
+            )
 
         # Проверка: не превышает ли загруженная эпоха целевую
         if epoch_str > hps.total_epoch:
@@ -345,7 +434,19 @@ def run(hps, rank, n_gpus, device, device_id):
             dist.destroy_process_group()
 
 
-def train_and_evaluate(hps, rank, epoch, nets, optims, train_loader, writer_eval, fn_mel_loss, device, device_id, epoch_recorder=None):
+def train_and_evaluate(
+    hps,
+    rank,
+    epoch,
+    nets,
+    optims,
+    train_loader,
+    writer_eval,
+    fn_mel_loss,
+    device,
+    device_id,
+    epoch_recorder=None,
+):
     global global_step
 
     net_g, net_d = nets
@@ -375,9 +476,13 @@ def train_and_evaluate(hps, rank, epoch, nets, optims, train_loader, writer_eval
             info = [tensor.to(device) for tensor in info]
 
         phone, phone_lengths, pitch, pitchf, spec, spec_lengths, wave, _, sid = info
-        model_output = net_g(phone, phone_lengths, pitch, pitchf, spec, spec_lengths, sid)
+        model_output = net_g(
+            phone, phone_lengths, pitch, pitchf, spec, spec_lengths, sid
+        )
         y_hat, ids_slice, _, z_mask, (_, z_p, m_p, logs_p, _, logs_q) = model_output
-        wave = slice_segments(wave, ids_slice * hps.data.hop_length, hps.train.segment_size, dim=3)
+        wave = slice_segments(
+            wave, ids_slice * hps.data.hop_length, hps.train.segment_size, dim=3
+        )
 
         # Discriminator loss
         for _ in range(1):
@@ -472,7 +577,9 @@ def train_and_evaluate(hps, rank, epoch, nets, optims, train_loader, writer_eval
         }
         image_dict = {
             "mel/slice/real": plot_spectrogram_to_numpy(y_mel[0].data.cpu().numpy()),
-            "mel/slice/fake": plot_spectrogram_to_numpy(y_hat_mel[0].data.cpu().numpy()),
+            "mel/slice/fake": plot_spectrogram_to_numpy(
+                y_hat_mel[0].data.cpu().numpy()
+            ),
         }
         for k, v in scalar_dict.items():
             writer_eval.add_scalar(k, v, epoch)
@@ -493,27 +600,59 @@ def train_and_evaluate(hps, rank, epoch, nets, optims, train_loader, writer_eval
             weights_dir = os.path.join(hps.model_dir, "weights")
             os.makedirs(weights_dir, exist_ok=True)
 
-            checkpoint_state = net_g.module.state_dict() if hasattr(net_g, "module") else net_g.state_dict()
-            intermediate_path = os.path.join(weights_dir, f"{hps.model_name}_e{epoch}_s{global_step}.pth")
-            print(extract_model(hps, checkpoint_state, epoch, global_step, intermediate_path, hps.save_half), flush=True)
+            checkpoint_state = (
+                net_g.module.state_dict()
+                if hasattr(net_g, "module")
+                else net_g.state_dict()
+            )
+            intermediate_path = os.path.join(
+                weights_dir, f"{hps.model_name}_e{epoch}_s{global_step}.pth"
+            )
+            print(
+                extract_model(
+                    hps,
+                    checkpoint_state,
+                    epoch,
+                    global_step,
+                    intermediate_path,
+                    hps.save_half,
+                ),
+                flush=True,
+            )
 
             # Финальная эпоха
             if is_final_epoch:
                 # Сохранение last модели
-                last_path = os.path.join(hps.model_dir, f"{hps.model_name}_e{epoch}_s{global_step}_last.pth")
-                print(extract_model(hps, checkpoint_state, epoch, global_step, last_path, hps.save_half), flush=True)
+                last_path = os.path.join(
+                    hps.model_dir, f"{hps.model_name}_e{epoch}_s{global_step}_last.pth"
+                )
+                print(
+                    extract_model(
+                        hps,
+                        checkpoint_state,
+                        epoch,
+                        global_step,
+                        last_path,
+                        hps.save_half,
+                    ),
+                    flush=True,
+                )
 
                 # Архивирование
                 if hps.save_to_zip:
                     import zipfile
 
                     zip_filename = os.path.join(hps.model_dir, f"{hps.model_name}.zip")
-                    with zipfile.ZipFile(zip_filename, "w", zipfile.ZIP_DEFLATED) as zipf:
+                    with zipfile.ZipFile(
+                        zip_filename, "w", zipfile.ZIP_DEFLATED
+                    ) as zipf:
                         # Добавляем last модель
                         if os.path.exists(last_path):
                             zipf.write(last_path, os.path.basename(last_path))
                         # Добавляем index
-                        index_path = os.path.join(hps.model_dir, f"{hps.model_name}.index")
+                        index_path = os.path.join(
+                            hps.model_dir, f"{hps.model_name}.index"
+                        )
                         if os.path.exists(index_path):
                             zipf.write(index_path, os.path.basename(index_path))
                     print(f"Файлы модели заархивированы в '{zip_filename}'", flush=True)

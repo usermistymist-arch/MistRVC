@@ -10,17 +10,29 @@ from rvc._library.predictors.rmvpe import RMVPE
 
 def median_interp_pitch(f0):
     f0 = np.where(f0 == 0, np.nan, f0)
-    return float(np.median(np.interp(np.arange(len(f0)), np.where(~np.isnan(f0))[0], f0[~np.isnan(f0)])))
+    return float(
+        np.median(
+            np.interp(np.arange(len(f0)), np.where(~np.isnan(f0))[0], f0[~np.isnan(f0)])
+        )
+    )
 
 
 def calc_pitch_shift(f0, target_f0=155.0, limit_f0=12):
-    return max(-limit_f0, min(limit_f0, int(np.round(12 * np.log2(target_f0 / median_interp_pitch(f0))))))
+    return max(
+        -limit_f0,
+        min(limit_f0, int(np.round(12 * np.log2(target_f0 / median_interp_pitch(f0))))),
+    )
 
 
 class AutoTune:
     """Класс для выполнения автотюна на аудиосигнале."""
 
-    def __init__(self, a4_frequency: float = 440.0, scale_name: str = "chromatic", tonic_note: str = "C"):
+    def __init__(
+        self,
+        a4_frequency: float = 440.0,
+        scale_name: str = "chromatic",
+        tonic_note: str = "C",
+    ):
         """Инициализирует класс AutoTune с заданными параметрами.
 
         Args:
@@ -73,9 +85,13 @@ class AutoTune:
         }
 
         if scale_name not in scale_intervals:
-            raise ValueError(f"Неизвестная гамма: '{scale_name}'. Доступные гаммы: {list(scale_intervals.keys())}")
+            raise ValueError(
+                f"Неизвестная гамма: '{scale_name}'. Доступные гаммы: {list(scale_intervals.keys())}"
+            )
         if tonic_note not in tonic_semitones:
-            raise ValueError(f"Неизвестная тоника: '{tonic_note}'. Доступные тоники: {list(tonic_semitones.keys())}")
+            raise ValueError(
+                f"Неизвестная тоника: '{tonic_note}'. Доступные тоники: {list(tonic_semitones.keys())}"
+            )
 
         selected_scale_intervals = scale_intervals[scale_name]
         selected_tonic_semitone = tonic_semitones[tonic_note]
@@ -92,7 +108,9 @@ class AutoTune:
         # Сохраняем массив целевых частот для быстрого поиска
         self.target_frequencies = np.array(target_frequencies)
 
-    def apply_autotune(self, input_f0: np.ndarray, autotune_strength: float) -> np.ndarray:
+    def apply_autotune(
+        self, input_f0: np.ndarray, autotune_strength: float
+    ) -> np.ndarray:
         """Применяет автотюн к массиву основной частоты (F0) аудиосигнала.
 
         Args:
@@ -121,7 +139,11 @@ class AutoTune:
         voiced_f0 = input_f0[is_voiced]
 
         # Находим индексы ближайших разрешённых нот в массиве target_frequencies
-        insertion_indices = np.clip(np.searchsorted(self.target_frequencies, voiced_f0), 1, len(self.target_frequencies) - 1)
+        insertion_indices = np.clip(
+            np.searchsorted(self.target_frequencies, voiced_f0),
+            1,
+            len(self.target_frequencies) - 1,
+        )
 
         # Получаем частоты ближайших нот "снизу" и "сверху"
         lower_note_freq = self.target_frequencies[insertion_indices - 1]
@@ -135,7 +157,9 @@ class AutoTune:
         )
 
         # Применяем коррекцию: сдвигаем частоту в сторону ближайшей ноты с заданной силой
-        output_f0[is_voiced] = voiced_f0 + (closest_target_frequencies - voiced_f0) * autotune_strength
+        output_f0[is_voiced] = (
+            voiced_f0 + (closest_target_frequencies - voiced_f0) * autotune_strength
+        )
         return output_f0
 
 
@@ -143,20 +167,32 @@ class RMVPEF0:
     def __init__(self, device, sample_rate=16000):
         self.device = device
         self.sample_rate = sample_rate
-        self.model_og = RMVPE(os.path.join("assets", "models", "predictors", "rmvpe.pt"), self.device, hpa=False)
-        self.model_hpa = RMVPE(os.path.join("assets", "models", "predictors", "hpa-rmvpe.pt"), self.device, hpa=True)
+        self.model_og = RMVPE(
+            os.path.join("assets", "models", "predictors", "rmvpe.pt"),
+            self.device,
+            hpa=False,
+        )
+        self.model_hpa = RMVPE(
+            os.path.join("assets", "models", "predictors", "hpa-rmvpe.pt"),
+            self.device,
+            hpa=True,
+        )
 
     def get_f0(self, audio, f0_min=50, f0_max=1100, type_rmvpe="rmvpe"):
         if type_rmvpe == "rmvpe":
             return self.model_og.infer_from_audio(audio, thred=0.03)
 
         if type_rmvpe == "rmvpe+":
-            return self.model_og.infer_from_audio_medfilt(audio, thred=0.02, f0_min=f0_min, f0_max=f0_max)
+            return self.model_og.infer_from_audio_medfilt(
+                audio, thred=0.02, f0_min=f0_min, f0_max=f0_max
+            )
 
         if type_rmvpe == "hpa-rmvpe":
             return self.model_hpa.infer_from_audio(audio, thred=0.03)
 
-        raise ValueError(f"Недопустимое значение: {type_rmvpe!r}. Доступные варианты: 'rmvpe', 'rmvpe+' и 'hpa-rmvpe'.")
+        raise ValueError(
+            f"Недопустимое значение: {type_rmvpe!r}. Доступные варианты: 'rmvpe', 'rmvpe+' и 'hpa-rmvpe'."
+        )
 
 
 class CREPEF0:
@@ -200,7 +236,9 @@ class FCPEF0:
         self.hop_size = hop_size
         self.model = spawn_bundled_infer_model(self.device)
 
-    def get_f0(self, audio, f0_min=50, f0_max=1100, p_len=None, use_interpolation=False):
+    def get_f0(
+        self, audio, f0_min=50, f0_max=1100, p_len=None, use_interpolation=False
+    ):
         if p_len is None:
             p_len = audio.shape[0] // self.hop_size
 
