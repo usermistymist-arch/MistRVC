@@ -115,7 +115,7 @@ def get_vc(model_path):
 
     # Извлекаем параметры модели
     tgt_sr = cpt["config"][-1]
-    cpt["config"][-3] = cpt["weight"]["emb_g.weight"].shape[0]
+    num_speakers = cpt["weight"]["emb_g.weight"].shape[0]
     vocoder = cpt.get("vocoder", "HiFi-GAN")
 
     # Инициализируем синтезатор
@@ -168,6 +168,9 @@ def load_pipeline(rvc_model):
     model_path, index_path = load_rvc_model(rvc_model)
     display_progress(0.3, "Получаем конвертер голоса...", False)
     cpt, net_g, tgt_sr, vc = get_vc(model_path)
+    
+    num_speakers = cpt["weight"]["emb_g.weight"].shape[0]
+    
     return {
         "embedder": embedder_model,
         "cpt": cpt,
@@ -175,6 +178,7 @@ def load_pipeline(rvc_model):
         "tgt_sr": tgt_sr,
         "vc": vc,
         "index_path": index_path,
+        "num_speakers": num_speakers,
     }
 
 
@@ -277,6 +281,7 @@ def convert_one(
     autotune_strength=1.0,
     stereo_sound=False,
     output_format="wav",
+    speaker_id=0,
 ):
     display_progress(0.4, "Загружаем аудио...", False)
     audio = load_audio(input_path, 16000)
@@ -287,7 +292,7 @@ def convert_one(
     audio_opt = pipe["vc"].pipeline(
         model=pipe["embedder"],
         net_g=pipe["net_g"],
-        sid=0,
+        sid=speaker_id,
         audio=audio,
         pitch=0 if autopitch else rvc_pitch,
         f0_min=f0_min,
@@ -330,6 +335,7 @@ def rvc_infer(
     audio_upscaling=False,  # FlashSR
     stereo_sound=False,
     output_format="wav",
+    speaker_id=0,
     progress=gr.Progress(track_tqdm=True),
 ):
     if not rvc_model:
@@ -360,6 +366,7 @@ def rvc_infer(
         autotune_strength=autotune_strength,
         stereo_sound=stereo_sound,
         output_format=output_format,
+        speaker_id=speaker_id,
     )
 
     if audio_upscaling:
@@ -414,6 +421,7 @@ def rvc_batch_infer(
     audio_upscaling=False,
     stereo_sound=False,
     output_format="wav",
+    speaker_id=0,
     progress=gr.Progress(track_tqdm=True),
 ):
     if not rvc_model:
@@ -460,6 +468,7 @@ def rvc_batch_infer(
                 autotune_strength=autotune_strength,
                 stereo_sound=stereo_sound,
                 output_format=output_format,
+                speaker_id=speaker_id,
             )
             if audio_upscaling:
                 upscale(output_path, target_dir, 2, config.device)
@@ -492,6 +501,7 @@ def rvc_edgetts_infer(
     autotune_strength=1.0,
     stereo_sound=False,
     output_format="wav",
+    speaker_id=0,
     # EdgeTTS
     tts_voice=None,
     tts_text=None,
@@ -532,6 +542,7 @@ def rvc_edgetts_infer(
         audio_upscaling=audio_upscaling,
         stereo_sound=stereo_sound,
         output_format=output_format,
+        speaker_id=speaker_id,
     )
 
     return input_path, output_path

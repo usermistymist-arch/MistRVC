@@ -655,6 +655,10 @@ def train_and_evaluate(
                         )
                         if os.path.exists(index_path):
                             zipf.write(index_path, os.path.basename(index_path))
+                        # Добавляем speakers.txt, если существует
+                        speakers_path = os.path.join(hps.model_dir, "speakers.txt")
+                        if os.path.exists(speakers_path):
+                            zipf.write(speakers_path, "speakers.txt")
                     print(f"Файлы модели заархивированы в '{zip_filename}'", flush=True)
 
                 print("\nОбучение успешно завершено!", flush=True)

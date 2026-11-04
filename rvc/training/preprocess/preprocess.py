@@ -90,7 +90,7 @@ class PreProcess:
         self.tail = self.percentage + self.overlap  # Хвост для обработки
         self.normalize = normalize  # Флаг для включения/выключения нормализации
 
-    def norm_write(self, tmp_audio, idx0, idx1):
+    def norm_write(self, tmp_audio, speaker_id, idx0, idx1):
         if self.normalize:
             tmp_max = np.abs(tmp_audio).max()
             if tmp_max > 0:
@@ -101,17 +101,25 @@ class PreProcess:
                 if peak > 1.0:
                     tmp_audio = tmp_audio * (1.0 / peak)
 
+        # Создаем папку для спикера, если её нет
+        speaker_gt_dir = os.path.join(self.gt_wavs_dir, str(speaker_id))
+        speaker_16k_dir = os.path.join(self.wavs16k_dir, str(speaker_id))
+        os.makedirs(speaker_gt_dir, exist_ok=True)
+        os.makedirs(speaker_16k_dir, exist_ok=True)
+
+        filename = f"{speaker_id}_{idx0}_{idx1}.wav"
+        
         wavfile.write(
-            f"{self.gt_wavs_dir}/{idx0}_{idx1}.wav",
+            os.path.join(speaker_gt_dir, filename),
             self.sample_rate,
             tmp_audio.astype(np.float32),
         )
-        # 16 кГц-двойник для F0/HuBERT: ресемпл один раз здесь, а не на каждый проход признаков
+        # 16 кГц-двойник для F0/HuBERT
         tmp_audio_16k = librosa.resample(
             tmp_audio, orig_sr=self.sample_rate, target_sr=16000, res_type="soxr_vhq"
         )
         wavfile.write(
-            f"{self.wavs16k_dir}/{idx0}_{idx1}.wav",
+            os.path.join(speaker_16k_dir, filename),
             16000,
             tmp_audio_16k.astype(np.float32),
         )
@@ -119,84 +127,90 @@ class PreProcess:
 
     def pipeline_inp_dir(self, input_root):
         try:
-            # Собираем только аудиофайлы; всё остальное в папке датасета игнорируем
-            names = sorted(
-                name
-                for name in os.listdir(input_root)
-                if is_audio_file(os.path.join(input_root, name))
-            )
-            if not names:
-                raise FileNotFoundError(
-                    f"В папке '{input_root}' не найдено ни одного аудиофайла (поддерживаются: {', '.join(sorted(AUDIO_EXTENSIONS))}).",
+            # Проверяем, есть ли подпапки с аудиофайлами
+            subdirs = [
+                d for d in os.listdir(input_root)
+                if os.path.isdir(os.path.join(input_root, d))
+            ]
+            
+            has_subdirs_with_audio = False
+            for d in subdirs:
+                dir_path = os.path.join(input_root, d)
+                if any(is_audio_file(os.path.join(dir_path, f)) for f in os.listdir(dir_path)):
+                    has_subdirs_with_audio = True
+                    break
+
+            if has_subdirs_with_audio:
+                print(f"Датасет разделён на папки, количество спикеров в датасете: {len(subdirs)}")
+                # Сортируем подпапки для детерминированного порядка speaker_id
+                subdirs.sort()
+                for speaker_id, subdir in enumerate(subdirs):
+                    dir_path = os.path.join(input_root, subdir)
+                    names = sorted(
+                        name for name in os.listdir(dir_path)
+                        if is_audio_file(os.path.join(dir_path, name))
+                    )
+                    if not names:
+                        continue
+                    print(f"[Спикер {speaker_id}] - Запуск процесса сегментации аудиоданных...")
+                    self._process_directory(dir_path, speaker_id, names)
+            else:
+                print("Датасет не разделён на спикеров, используется спикер айди 0")
+                names = sorted(
+                    name for name in os.listdir(input_root)
+                    if is_audio_file(os.path.join(input_root, name))
                 )
-
-            print("[1/3] - Запуск процесса сегментации аудиоданных...")
-
-            total_segments = 0
-            # Прогресс по файлам; счетчик сегментов тикает в постфиксе в реальном времени.
-            # ncols фиксируем, чтобы при сломанном определении ширины терминала tqdm не игнорировал bar_format
-            with tqdm(
-                total=len(names),
-                desc="Сегментация аудиоданных",
-                bar_format="{desc}: {n}/{total}{postfix}",
-                ncols=80,
-            ) as pbar:
-                last_paint = 0.0
-                for idx, name in enumerate(names):
-                    path = os.path.join(input_root, name)
-                    try:
-                        # Загрузка аудио
-                        audio = load_audio(path, self.sample_rate)
-                        # Применение фильтра высоких частот
-                        audio = signal.lfilter(self.b_high, self.a_high, audio)
-
-                        idx1 = 0
-                        # Нарезка аудио на сегменты
-                        for audio in self.slicer.slice(audio):
-                            i = 0
-                            while True:
-                                # Вычисление начальной точки сегмента
-                                start = int(
-                                    self.sample_rate
-                                    * (self.percentage - self.overlap)
-                                    * i
-                                )
-                                i += 1
-                                # Проверка, остался ли хвост аудио
-                                if len(audio[start:]) > self.tail * self.sample_rate:
-                                    tmp_audio = audio[
-                                        start : start
-                                        + int(self.percentage * self.sample_rate)
-                                    ]
-                                    total_segments += self.norm_write(
-                                        tmp_audio, idx, idx1
-                                    )
-                                    idx1 += 1
-                                    # Перерисовываем счетчик не чаще ~10 раз в секунду:
-                                    # чаще — терминал не успевает и число в конце файла прыгает
-                                    if time.monotonic() - last_paint >= 0.1:
-                                        last_paint = time.monotonic()
-                                        pbar.postfix = Postfix(
-                                            f" [сегментов: {total_segments}]"
-                                        )
-                                        pbar.refresh()
-                                else:
-                                    tmp_audio = audio[start:]
-                                    if len(tmp_audio) > 0:  # Пустой хвост не записываем
-                                        total_segments += self.norm_write(
-                                            tmp_audio, idx, idx1
-                                        )
-                                        idx1 += 1
-                                    break
-                    except Exception:
-                        raise RuntimeError(f"{path}\t-> {traceback.format_exc()}")
-                    pbar.update(1)
-                    pbar.postfix = Postfix(f" [сегментов: {total_segments}]")
-                    pbar.refresh()
+                if not names:
+                    raise FileNotFoundError(
+                        f"В папке '{input_root}' не найдено ни одного аудиофайла (поддерживаются: {', '.join(sorted(AUDIO_EXTENSIONS))}).",
+                    )
+                self._process_directory(input_root, 0, names)
 
             print("✓ Сегментация успешно завершена!")
         except Exception:
             raise RuntimeError(f"Ошибка! {traceback.format_exc()}")
+
+    def _process_directory(self, dir_path, speaker_id, names):
+        total_segments = 0
+        with tqdm(
+            total=len(names),
+            desc=f"Сегментация (спикер {speaker_id})",
+            bar_format="{desc}: {n}/{total}{postfix}",
+            ncols=80,
+        ) as pbar:
+            last_paint = 0.0
+            for idx, name in enumerate(names):
+                path = os.path.join(dir_path, name)
+                try:
+                    audio = load_audio(path, self.sample_rate)
+                    audio = signal.lfilter(self.b_high, self.a_high, audio)
+
+                    idx1 = 0
+                    for audio_segment in self.slicer.slice(audio):
+                        i = 0
+                        while True:
+                            start = int(self.sample_rate * (self.percentage - self.overlap) * i)
+                            i += 1
+                            if len(audio_segment[start:]) > self.tail * self.sample_rate:
+                                tmp_audio = audio_segment[start : start + int(self.percentage * self.sample_rate)]
+                                total_segments += self.norm_write(tmp_audio, speaker_id, idx, idx1)
+                                idx1 += 1
+                                if time.monotonic() - last_paint >= 0.1:
+                                    last_paint = time.monotonic()
+                                    pbar.postfix = Postfix(f" [сегментов: {total_segments}]")
+                                    pbar.refresh()
+                            else:
+                                tmp_audio = audio_segment[start:]
+                                if len(tmp_audio) > 0:
+                                    total_segments += self.norm_write(tmp_audio, speaker_id, idx, idx1)
+                                    idx1 += 1
+                                break
+                except Exception:
+                    raise RuntimeError(f"{path}\t-> {traceback.format_exc()}")
+                
+                pbar.update(1)
+                pbar.postfix = Postfix(f" [сегментов: {total_segments}]")
+                pbar.refresh()
 
 
 def preprocess_trainset(input_root, sample_rate, exp_dir, percentage, normalize):

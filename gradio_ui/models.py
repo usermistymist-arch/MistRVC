@@ -36,10 +36,9 @@ def _upload_zip(zip_file, dir_name, progress=gr.Progress()):
     return upload_zip_file(zip_file, dir_name, progress=progress)
 
 
-def _upload_files(pth_file, index_file, dir_name, progress=gr.Progress()):
+def _upload_files(pth_file, index_file, speakers_file, dir_name, progress=gr.Progress()):
     from rvc.inference.modules.model_manager import upload_separate_files
-
-    return upload_separate_files(pth_file, index_file, dir_name, progress=progress)
+    return upload_separate_files(pth_file, index_file, speakers_file, dir_name, progress=progress)
 
 
 def _install_embedder(model_name, custom_url, progress=gr.Progress()):
@@ -89,7 +88,7 @@ def models_tab(offline: bool):
     refresh_btn.click(refresh_models, outputs=model_dropdowns(), api_name=False)
 
     if not offline:
-        with gr.Accordion("По ссылке (ZIP)", open=False):
+        with gr.Accordion("По ссылке (ZIP)", open=True):
             gr.Markdown(
                 "HuggingFace · Pixeldrain · Google Drive · Mega · Яндекс Диск · Dropbox"
             )
@@ -105,11 +104,15 @@ def models_tab(offline: bool):
         zip_name = gr.Textbox(label="Имя модели", scale=2)
         zip_btn = gr.Button("Загрузить", variant="primary")
 
-    with gr.Accordion("Файлы .pth + .index", open=False):
+    with gr.Accordion("Раздельно .pth, .index, speakers.txt", open=False):
+        gr.Markdown("Файл speakers.txt опционален, нужен лишь мультиспикерным моделям.")
         with gr.Row():
             pth_file = gr.File(label=".pth", file_types=[".pth"], file_count="single")
-            index_file = gr.File(
-                label=".index", file_types=[".index"], file_count="single"
+            index_file = gr.File(label=".index", file_types=[".index"], file_count="single")
+            speakers_file = gr.File(
+                label="speakers.txt",
+                file_types=[".txt"],
+                file_count="single",
             )
         files_name = gr.Textbox(label="Имя модели")
         files_btn = gr.Button("Загрузить", variant="primary")
@@ -151,7 +154,7 @@ def models_tab(offline: bool):
         api_name=False,
     )
     files_btn.click(
-        _upload_files, inputs=[pth_file, index_file, files_name], outputs=message
+        _upload_files, inputs=[pth_file, index_file, speakers_file, files_name], outputs=message
     ).then(
         refresh_models,
         outputs=model_dropdowns(),

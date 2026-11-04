@@ -19,19 +19,34 @@ try:
     index_filepath = os.path.join(exp_dir, index_filename)
 
     if os.path.exists(index_filepath):
-        pass
+        print(f"✓ Индекс уже существует - '{index_filepath}'. Пропускаем генерацию.")
     else:
         npys = []
-        listdir_res = sorted(os.listdir(feature_dir))
+        
+        # Проверяем, есть ли подпапки (мульти-спикер)
+        speaker_dirs = [d for d in os.listdir(feature_dir) if os.path.isdir(os.path.join(feature_dir, d))]
+        
+        files_to_process = []
+        if speaker_dirs:
+            for speaker_dir in speaker_dirs:
+                speaker_feature_dir = os.path.join(feature_dir, speaker_dir)
+                for f in os.listdir(speaker_feature_dir):
+                    if f.endswith(".npy"):
+                        files_to_process.append(os.path.join(speaker_feature_dir, f))
+        else:
+            for f in os.listdir(feature_dir):
+                if f.endswith(".npy"):
+                    files_to_process.append(os.path.join(feature_dir, f))
+                    
+        files_to_process.sort()
 
         # ncols фиксируем, чтобы при сломанном определении ширины терминала tqdm не игнорировал bar_format
-        for name in tqdm(
-            listdir_res,
+        for file_path in tqdm(
+            files_to_process,
             desc="Загрузка признаков HuBERT",
             bar_format="{desc}: {n}/{total}",
             ncols=80,
         ):
-            file_path = os.path.join(feature_dir, name)
             phone = np.load(file_path)
             npys.append(phone)
 

@@ -102,11 +102,7 @@ with gr.Blocks(
 ) as MistRVC:
     gr.Markdown(
         elem_classes=["app-header"],
-        value=f"# MistRVC <small>v{__version__}</small>\n"
-        "[Telegram](https://t.me/politrees) · "
-        "[Чат](https://t.me/+GMTP7hZqY0E4OGRi) · "
-        "[YouTube](https://www.youtube.com/@Politrees) · "
-        "[GitHub](https://github.com/usermistymist-arch/MistRVC)",
+        value=f"# MistRVC <small>v{__version__}</small>",
     )
 
     with gr.Tab("Конвертация") as conversion_tab_ui:

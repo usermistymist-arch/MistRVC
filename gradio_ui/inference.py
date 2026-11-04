@@ -1,6 +1,7 @@
 """Вкладка «Конвертация»: одиночная и пакетная замена голоса (классический вид)."""
 
 import os
+import torch
 from datetime import datetime
 
 import gradio as gr
@@ -17,6 +18,37 @@ from gradio_ui.common import (
 )
 from gradio_ui.tts import tts_tab
 
+
+def _get_speaker_update(model_name: str):
+    """Читает speakers.txt и возвращает gr.update для dropdown speaker_id."""
+    from gradio_ui.common import RVC_MODELS_DIR
+    
+    if not model_name:
+        return gr.update(visible=False, value=None)
+    
+    model_dir = os.path.join(RVC_MODELS_DIR, model_name)
+    if not os.path.isdir(model_dir):
+        return gr.update(visible=False, value=None)
+    
+    speakers_path = os.path.join(model_dir, "speakers.txt")
+    if not os.path.exists(speakers_path):
+        return gr.update(visible=False, value=None)
+    
+    try:
+        speaker_names = []
+        with open(speakers_path, "r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if "=" in line:
+                    name = line.split("=", 1)[1].strip()
+                    speaker_names.append(name)
+        
+        if len(speaker_names) > 1:
+            return gr.update(visible=True, choices=speaker_names, value=speaker_names[0])
+        else:
+            return gr.update(visible=False, value=None)
+    except Exception:
+        return gr.update(visible=False, value=None)
 
 def _unique_batch_dir() -> str:
     """Новая подпапка пакета внутри общей папки вывода; повторы исключены."""
@@ -48,9 +80,25 @@ def _convert(
     autotune_strength,
     stereo_sound,
     audio_upscaling,
+    speaker_id,
     progress=gr.Progress(track_tqdm=True),
 ):
     from rvc.inference.infer import rvc_infer
+    
+    # Преобразуем имя спикера в ID
+    if speaker_id is None:
+        speaker_id_int = 0
+    elif isinstance(speaker_id, str):
+        from gradio_ui.common import RVC_MODELS_DIR
+        model_dir = os.path.join(RVC_MODELS_DIR, rvc_model)
+        speakers_path = os.path.join(model_dir, "speakers.txt")
+        if os.path.exists(speakers_path):
+            with open(speakers_path, "r", encoding="utf-8") as f:
+                names = [line.split("=", 1)[1].strip() for line in f if "=" in line]
+            if speaker_id in names:
+                speaker_id_int = names.index(speaker_id)
+    else:
+        speaker_id_int = int(speaker_id)
 
     return rvc_infer(
         rvc_model=rvc_model,
@@ -71,6 +119,7 @@ def _convert(
         audio_upscaling=audio_upscaling,
         stereo_sound=stereo_sound,
         output_format=output_format,
+        speaker_id=speaker_id_int,
         progress=progress,
     )
 
@@ -95,9 +144,25 @@ def _convert_batch(
     autotune_strength,
     stereo_sound,
     audio_upscaling,
+    speaker_id,
     progress=gr.Progress(track_tqdm=True),
 ):
     from rvc.inference.infer import rvc_batch_infer
+    
+    # Преобразуем имя спикера в ID
+    if speaker_id is None:
+        speaker_id_int = 0
+    elif isinstance(speaker_id, str):
+        from gradio_ui.common import RVC_MODELS_DIR
+        model_dir = os.path.join(RVC_MODELS_DIR, rvc_model)
+        speakers_path = os.path.join(model_dir, "speakers.txt")
+        if os.path.exists(speakers_path):
+            with open(speakers_path, "r", encoding="utf-8") as f:
+                names = [line.split("=", 1)[1].strip() for line in f if "=" in line]
+            if speaker_id in names:
+                speaker_id_int = names.index(speaker_id)
+    else:
+        speaker_id_int = int(speaker_id)
 
     output_dir = _unique_batch_dir()
     summary = rvc_batch_infer(
@@ -121,6 +186,7 @@ def _convert_batch(
         audio_upscaling=audio_upscaling,
         stereo_sound=stereo_sound,
         output_format=output_format,
+        speaker_id=speaker_id_int,
         progress=progress,
     )
     results = sorted(
@@ -137,7 +203,22 @@ def _single_conversion_tab():
     with gr.Row():
         with gr.Column(scale=1, variant="panel"):
             rvc_model = model_select()
+            
+            speaker_id = gr.Dropdown(
+                choices=[0],
+                value=0,
+                label="ID спикера",
+                visible=False,
+            )
+            
             autopitch, autopitch_threshold, rvc_pitch = pitch_group()
+            
+            rvc_model.change(
+                fn=_get_speaker_update,
+                inputs=rvc_model,
+                outputs=speaker_id,
+                api_name=False,
+            )
 
         with gr.Column(scale=2, variant="panel"):
             with gr.Column() as upload_file:
@@ -226,6 +307,7 @@ def _single_conversion_tab():
             settings["autotune_strength"],
             settings["stereo_sound"],
             settings["audio_upscaling"],
+            speaker_id,
         ],
         outputs=[converted_voice],
     )
@@ -235,7 +317,22 @@ def _batch_conversion_tab():
     with gr.Row():
         with gr.Column(scale=1, variant="panel"):
             rvc_model = model_select()
+            
+            speaker_id = gr.Dropdown(
+                choices=[0],
+                value=0,
+                label="ID спикера",
+                visible=False,
+            )
+            
             autopitch, autopitch_threshold, rvc_pitch = pitch_group()
+            
+            rvc_model.change(
+                fn=_get_speaker_update,
+                inputs=rvc_model,
+                outputs=speaker_id,
+                api_name=False,
+            )
 
         with gr.Column(scale=2, variant="panel"):
             dir_input = gr.Textbox(
@@ -290,6 +387,7 @@ def _batch_conversion_tab():
             settings["autotune_strength"],
             settings["stereo_sound"],
             settings["audio_upscaling"],
+            speaker_id,
         ],
         outputs=[batch_result],
     )
