@@ -41,7 +41,7 @@ sys.modules["fairseq.data.dictionary"] = fairseq_data_dictionary
 
 
 def load_model(filename):
-    # БЕЗОПАСНО: Это встроенный доверенный ассет проекта (contentvec_base.pt), 
+    # БЕЗОПАСНО: Это встроенный доверенный ассет проекта (contentvec_base.pt),
     # а не пользовательская модель. Путь контролируется кодом, а не вводом пользователя.
     # Пользовательские модели в infer.py и train.py защищены строгой проверкой weights_only=True.
     state = torch.load(filename, map_location="cpu", weights_only=False)

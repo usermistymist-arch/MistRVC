@@ -1,9 +1,7 @@
-import asyncio
 import gc
 import os
 import threading
 
-import edge_tts
 import gradio as gr
 import torch
 
@@ -11,7 +9,6 @@ from rvc._library.algorithm.synthesizers import Synthesizer
 from rvc._library.audio import load_audio, save_audio
 from rvc._library.config import Config
 from rvc._library.embedders.fairseq import load_model
-from rvc.inference.modules.audio_upscaler import upscale
 from rvc.inference.pipeline import VC
 
 # Определяем пути к папкам и файлам (константы).
@@ -115,7 +112,6 @@ def get_vc(model_path):
 
     # Извлекаем параметры модели
     tgt_sr = cpt["config"][-1]
-    num_speakers = cpt["weight"]["emb_g.weight"].shape[0]
     vocoder = cpt.get("vocoder", "HiFi-GAN")
 
     # Инициализируем синтезатор
@@ -131,33 +127,24 @@ def get_vc(model_path):
     return cpt, net_g, tgt_sr, vc
 
 
-# Синтезирует текст в речь с использованием edge_tts.
-async def text_to_speech(voice, text, rate, volume, pitch, output_path):
-    if not -100 <= rate <= 100 or not -100 <= volume <= 100 or not -100 <= pitch <= 100:
-        raise ValueError(
-            "Параметры Rate, Volume и Pitch должны быть в диапазоне от -100 до +100."
-        )
-
-    communicate = edge_tts.Communicate(
-        voice=voice,
-        text=text,
-        rate=f"{rate:+d}%",
-        volume=f"{volume:+d}%",
-        pitch=f"{pitch:+d}Hz",
-    )
-    await communicate.save(output_path)
-
-
 # Собирает путь выходного файла вида `<имя>_(<модель>).<формат>`
-def build_output_path(input_path, output_dir, rvc_model, output_format):
+def build_output_path(input_path, output_dir, rvc_model, output_format, speaker_name=None, filename_template="{NAME}_({MODEL}_{SPEAKER})"):
     base_name = os.path.splitext(os.path.basename(input_path))[0]
-    if (
-        len(base_name) > 100
-    ):  # Сменить имя выходного файла, если длина исходного более 100 символов
+    if len(base_name) > 100:
         gr.Warning("Имя файла превышает 100 символов и будет сокращено для удобства.")
-        base_name = f"{base_name[:25]}... (Made_in_MistRVC)"
+        base_name = f"{base_name[:25]}... (MistRVC)"
     os.makedirs(output_dir, exist_ok=True)
-    return os.path.join(output_dir, f"{base_name}_({rvc_model}).{output_format}")
+    
+    speaker_str = speaker_name if speaker_name else ""
+    filename = filename_template.replace("{NAME}", base_name)\
+                                .replace("{MODEL}", rvc_model)\
+                                .replace("{SPEAKER}", speaker_str)
+    
+    # Очистка от лишних символов, если SPEAKER пустой (например, "_{SPEAKER}" -> "")
+    if not speaker_str:
+        filename = filename.replace("_{SPEAKER}", "").replace("{SPEAKER}_", "").replace("{SPEAKER}", "")
+        
+    return os.path.join(output_dir, f"{filename}.{output_format}")
 
 
 # Загружает эмбеддер, модель и конвертер голоса одним набором
@@ -168,9 +155,9 @@ def load_pipeline(rvc_model):
     model_path, index_path = load_rvc_model(rvc_model)
     display_progress(0.3, "Получаем конвертер голоса...", False)
     cpt, net_g, tgt_sr, vc = get_vc(model_path)
-    
+
     num_speakers = cpt["weight"]["emb_g.weight"].shape[0]
-    
+
     return {
         "embedder": embedder_model,
         "cpt": cpt,
@@ -273,13 +260,6 @@ def convert_one(
     protect=0.5,
     index_rate=0.25,
     volume_envelope=1.0,
-    autopitch=False,
-    autopitch_threshold=155.0,
-    autotune=False,
-    autotune_tonic="C",
-    autotune_scale="chromatic",
-    autotune_strength=1.0,
-    stereo_sound=False,
     output_format="wav",
     speaker_id=0,
 ):
@@ -294,7 +274,7 @@ def convert_one(
         net_g=pipe["net_g"],
         sid=speaker_id,
         audio=audio,
-        pitch=0 if autopitch else rvc_pitch,
+        pitch=rvc_pitch,
         f0_min=f0_min,
         f0_max=f0_max,
         f0_method=f0_method,
@@ -302,16 +282,10 @@ def convert_one(
         index_rate=index_rate,
         volume_envelope=volume_envelope,
         protect=protect,
-        autopitch=autopitch,
-        autopitch_threshold=autopitch_threshold,
-        autotune=autotune,
-        autotune_tonic=autotune_tonic,
-        autotune_scale=autotune_scale,
-        autotune_strength=autotune_strength,
     )
 
     display_progress(0.8, "[💫] Сохраняем результат...", True)
-    save_audio(audio_opt, pipe["tgt_sr"], output_path, output_format, stereo_sound)
+    save_audio(audio_opt, pipe["tgt_sr"], output_path, output_format)
     return output_path
 
 
@@ -326,16 +300,10 @@ def rvc_infer(
     protect=0.5,
     index_rate=0.25,
     volume_envelope=1.0,
-    autopitch=False,
-    autopitch_threshold=155.0,
-    autotune=False,
-    autotune_tonic="C",
-    autotune_scale="chromatic",
-    autotune_strength=1.0,
-    audio_upscaling=False,  # FlashSR
-    stereo_sound=False,
     output_format="wav",
     speaker_id=0,
+    speaker_name="",
+    filename_template="{NAME}_({MODEL}_{SPEAKER})",
     progress=gr.Progress(track_tqdm=True),
 ):
     if not rvc_model:
@@ -346,7 +314,9 @@ def rvc_infer(
     display_progress(0, "\n[⚙️] Запуск конвейера генерации...", True)
     # Пайплайн остаётся в памяти: следующий запуск этой же модели стартует сразу.
     pipe = get_pipeline(rvc_model)
-    output_path = build_output_path(input_path, OUTPUT_DIR, rvc_model, output_format)
+    output_path = build_output_path(
+        input_path, OUTPUT_DIR, rvc_model, output_format, speaker_name, filename_template
+    )
     convert_one(
         pipe,
         input_path,
@@ -358,20 +328,9 @@ def rvc_infer(
         protect=protect,
         index_rate=index_rate,
         volume_envelope=volume_envelope,
-        autopitch=autopitch,
-        autopitch_threshold=autopitch_threshold,
-        autotune=autotune,
-        autotune_tonic=autotune_tonic,
-        autotune_scale=autotune_scale,
-        autotune_strength=autotune_strength,
-        stereo_sound=stereo_sound,
         output_format=output_format,
         speaker_id=speaker_id,
     )
-
-    if audio_upscaling:
-        display_progress(0.9, "[🚀] Улучшаем качество аудио...", True)
-        upscale(output_path, OUTPUT_DIR, 2, config.device)
 
     display_progress(1.0, f"[✅] Преобразование завершено — {output_path}", True)
     return gr.Audio(output_path, label=os.path.basename(output_path))
@@ -412,16 +371,10 @@ def rvc_batch_infer(
     protect=0.5,
     index_rate=0.25,
     volume_envelope=1.0,
-    autopitch=False,
-    autopitch_threshold=155.0,
-    autotune=False,
-    autotune_tonic="C",
-    autotune_scale="chromatic",
-    autotune_strength=1.0,
-    audio_upscaling=False,
-    stereo_sound=False,
     output_format="wav",
     speaker_id=0,
+    speaker_name="",
+    filename_template="{NAME}_({MODEL}_{SPEAKER})",
     progress=gr.Progress(track_tqdm=True),
 ):
     if not rvc_model:
@@ -447,7 +400,7 @@ def rvc_batch_infer(
         )
         try:
             output_path = build_output_path(
-                input_path, target_dir, rvc_model, output_format
+                input_path, target_dir, rvc_model, output_format, speaker_name, filename_template
             )
             convert_one(
                 pipe,
@@ -460,18 +413,9 @@ def rvc_batch_infer(
                 protect=protect,
                 index_rate=index_rate,
                 volume_envelope=volume_envelope,
-                autopitch=autopitch,
-                autopitch_threshold=autopitch_threshold,
-                autotune=autotune,
-                autotune_tonic=autotune_tonic,
-                autotune_scale=autotune_scale,
-                autotune_strength=autotune_strength,
-                stereo_sound=stereo_sound,
                 output_format=output_format,
                 speaker_id=speaker_id,
             )
-            if audio_upscaling:
-                upscale(output_path, target_dir, 2, config.device)
             done.append(output_path)
         except Exception as error:
             failed.append(f"{os.path.basename(input_path)}: {error}")
@@ -481,68 +425,3 @@ def rvc_batch_infer(
     lines.extend(f"✗ {item}" for item in failed)
     print(f"[✅] Пакетная конвертация завершена — {len(done)}/{len(inputs)}")
     return "\n".join(lines)
-
-
-def rvc_edgetts_infer(
-    # RVC
-    rvc_model=None,
-    f0_method="rmvpe",
-    f0_min=50,
-    f0_max=1100,
-    rvc_pitch=0,
-    protect=0.5,
-    index_rate=0.25,
-    volume_envelope=1.0,
-    autopitch=False,
-    autopitch_threshold=155.0,
-    autotune=False,
-    autotune_tonic="C",
-    autotune_scale="chromatic",
-    autotune_strength=1.0,
-    stereo_sound=False,
-    output_format="wav",
-    speaker_id=0,
-    # EdgeTTS
-    tts_voice=None,
-    tts_text=None,
-    tts_rate=0,
-    tts_volume=0,
-    tts_pitch=0,
-    # FlashSR
-    audio_upscaling=False,
-    progress=gr.Progress(track_tqdm=True),
-):
-    if not tts_text:
-        raise ValueError("Введите текст!")
-    if not tts_voice:
-        raise ValueError("Выберите голос!")
-
-    display_progress(1.0, "[🎙️] Синтезируем речь...", False)
-    input_path = os.path.join(OUTPUT_DIR, "TTS_Voice.wav")
-    asyncio.run(
-        text_to_speech(tts_voice, tts_text, tts_rate, tts_volume, tts_pitch, input_path)
-    )
-
-    output_path = rvc_infer(
-        rvc_model=rvc_model,
-        input_path=input_path,
-        f0_method=f0_method,
-        f0_min=f0_min,
-        f0_max=f0_max,
-        rvc_pitch=rvc_pitch,
-        protect=protect,
-        index_rate=index_rate,
-        volume_envelope=volume_envelope,
-        autopitch=autopitch,
-        autopitch_threshold=autopitch_threshold,
-        autotune=autotune,
-        autotune_tonic=autotune_tonic,
-        autotune_scale=autotune_scale,
-        autotune_strength=autotune_strength,
-        audio_upscaling=audio_upscaling,
-        stereo_sound=stereo_sound,
-        output_format=output_format,
-        speaker_id=speaker_id,
-    )
-
-    return input_path, output_path

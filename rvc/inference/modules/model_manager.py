@@ -34,16 +34,28 @@ def extract_zip(extraction_folder, zip_name):
                 speakers_filepath = file_path
 
     if not model_filepath:
-        raise gr.Error(f"Не найден файл модели .pth в распакованном zip-файле. Проверьте содержимое в {extraction_folder}.")
+        raise gr.Error(
+            f"Не найден файл модели .pth в распакованном zip-файле. Проверьте содержимое в {extraction_folder}."
+        )
 
-    rename_and_cleanup(extraction_folder, model_filepath, index_filepath, speakers_filepath)
+    rename_and_cleanup(
+        extraction_folder, model_filepath, index_filepath, speakers_filepath
+    )
 
 
 # Функция для переименования файлов и удаления пустых папок
-def rename_and_cleanup(extraction_folder, model_filepath, index_filepath, speakers_filepath=None):
-    os.rename(model_filepath, os.path.join(extraction_folder, os.path.basename(model_filepath)))
+def rename_and_cleanup(
+    extraction_folder, model_filepath, index_filepath, speakers_filepath=None
+):
+    os.rename(
+        model_filepath,
+        os.path.join(extraction_folder, os.path.basename(model_filepath)),
+    )
     if index_filepath:
-        os.rename(index_filepath, os.path.join(extraction_folder, os.path.basename(index_filepath)))
+        os.rename(
+            index_filepath,
+            os.path.join(extraction_folder, os.path.basename(index_filepath)),
+        )
     if speakers_filepath:
         os.rename(speakers_filepath, os.path.join(extraction_folder, "speakers.txt"))
 
@@ -93,11 +105,15 @@ def upload_zip_file(zip_path, dir_name, progress=gr.Progress()):
 
 
 # Функция для загрузки отдельных файлов модели (.pth и .index)
-def upload_separate_files(pth_file, index_file, speakers_file, dir_name, progress=gr.Progress()):
+def upload_separate_files(
+    pth_file, index_file, speakers_file, dir_name, progress=gr.Progress()
+):
     try:
         extraction_folder = os.path.join(rvc_models_dir, dir_name)
         if os.path.exists(extraction_folder):
-            raise gr.Error(f"Директория голосовой модели {dir_name} уже существует! Выберите другое имя.")
+            raise gr.Error(
+                f"Директория голосовой модели {dir_name} уже существует! Выберите другое имя."
+            )
 
         os.makedirs(extraction_folder, exist_ok=True)
 
@@ -108,7 +124,9 @@ def upload_separate_files(pth_file, index_file, speakers_file, dir_name, progres
 
         progress(0.6, desc="[~] Загрузка .index файла...")
         if index_file:
-            index_path = os.path.join(extraction_folder, os.path.basename(index_file.name))
+            index_path = os.path.join(
+                extraction_folder, os.path.basename(index_file.name)
+            )
             shutil.copyfile(index_file.name, index_path)
 
         progress(0.9, desc="[~] Загрузка файла спикеров...")

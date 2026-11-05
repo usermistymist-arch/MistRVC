@@ -75,7 +75,7 @@ def _split_checkpoint(checkpoint_file, output_dir) -> str:
 
     path = _uploaded_path(checkpoint_file)
     if not path:
-        raise gr.Error("Прикрепите checkpoint.pth.")
+        raise gr.Error("Укажите путь или прикрепите checkpoint.pth.")
     try:
         return split_checkpoint(path, output_dir.strip() or DEFAULT_SPLIT_DIR)
     except (FileNotFoundError, ValueError) as error:
@@ -125,15 +125,64 @@ def tools_tab():
     with gr.Accordion("Разделение чекпоинта (G / D)", open=False):
         gr.Markdown("Единый `checkpoint.pth` → `G_pretrain.pth` + `D_pretrain.pth`.")
         with gr.Row():
-            checkpoint_file = gr.File(
-                label="Чекпоинт", file_types=[".pth"], file_count="single", scale=2
-            )
+            with gr.Column(scale=2):
+                with gr.Column() as upload_file:
+                    checkpoint_file = gr.File(
+                        label="Чекпоинт", file_types=[".pth"], file_count="single"
+                    )
+                with gr.Column(visible=False) as enter_local_file:
+                    checkpoint_path = gr.Textbox(
+                        label="Путь к чекпоинту:",
+                        info="Введите полный путь к файлу .pth",
+                    )
+                with gr.Row():
+                    show_upload_button = gr.Button(
+                        value="Загрузить файл с устройства",
+                        visible=False,
+                    )
+                    show_enter_button = gr.Button(value="Ввести путь к файлу")
             split_dir = gr.Textbox(DEFAULT_SPLIT_DIR, label="Папка результата", scale=3)
+
         split_btn = gr.Button("Разделить", variant="primary")
         split_message = gr.Textbox(label="Результат", lines=4, interactive=False)
+
+        # Переключение видимости между загрузкой и вводом пути
+        show_upload_button.click(
+            lambda: (gr.update(visible=True), gr.update(visible=False)),
+            outputs=[upload_file, enter_local_file],
+            api_name=False,
+        )
+        show_enter_button.click(
+            lambda: (gr.update(visible=False), gr.update(visible=True)),
+            outputs=[upload_file, enter_local_file],
+            api_name=False,
+        )
+        show_upload_button.click(
+            lambda: (gr.update(visible=False), gr.update(visible=True)),
+            outputs=[show_upload_button, show_enter_button],
+            api_name=False,
+        )
+        show_enter_button.click(
+            lambda: (gr.update(visible=True), gr.update(visible=False)),
+            outputs=[show_upload_button, show_enter_button],
+            api_name=False,
+        )
+
+        # Функция для получения пути из любого источника
+        def _resolve_checkpoint_path(file_obj, path_str):
+            if file_obj is not None:
+                return getattr(file_obj, "name", None) or (
+                    file_obj if isinstance(file_obj, str) else None
+                )
+            if path_str and path_str.strip():
+                return path_str.strip()
+            return None
+
         split_btn.click(
-            _split_checkpoint,
-            inputs=[checkpoint_file, split_dir],
+            lambda file_obj, path_str, out_dir: _split_checkpoint(
+                _resolve_checkpoint_path(file_obj, path_str), out_dir
+            ),
+            inputs=[checkpoint_file, checkpoint_path, split_dir],
             outputs=split_message,
         )
 

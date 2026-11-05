@@ -36,9 +36,14 @@ def _upload_zip(zip_file, dir_name, progress=gr.Progress()):
     return upload_zip_file(zip_file, dir_name, progress=progress)
 
 
-def _upload_files(pth_file, index_file, speakers_file, dir_name, progress=gr.Progress()):
+def _upload_files(
+    pth_file, index_file, speakers_file, dir_name, progress=gr.Progress()
+):
     from rvc.inference.modules.model_manager import upload_separate_files
-    return upload_separate_files(pth_file, index_file, speakers_file, dir_name, progress=progress)
+
+    return upload_separate_files(
+        pth_file, index_file, speakers_file, dir_name, progress=progress
+    )
 
 
 def _install_embedder(model_name, custom_url, progress=gr.Progress()):
@@ -108,7 +113,9 @@ def models_tab(offline: bool):
         gr.Markdown("Файл speakers.txt опционален, нужен лишь мультиспикерным моделям.")
         with gr.Row():
             pth_file = gr.File(label=".pth", file_types=[".pth"], file_count="single")
-            index_file = gr.File(label=".index", file_types=[".index"], file_count="single")
+            index_file = gr.File(
+                label=".index", file_types=[".index"], file_count="single"
+            )
             speakers_file = gr.File(
                 label="speakers.txt",
                 file_types=[".txt"],
@@ -154,7 +161,9 @@ def models_tab(offline: bool):
         api_name=False,
     )
     files_btn.click(
-        _upload_files, inputs=[pth_file, index_file, speakers_file, files_name], outputs=message
+        _upload_files,
+        inputs=[pth_file, index_file, speakers_file, files_name],
+        outputs=message,
     ).then(
         refresh_models,
         outputs=model_dropdowns(),

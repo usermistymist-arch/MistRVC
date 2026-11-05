@@ -113,12 +113,6 @@ PRETRAINS = {
         "UK-R": {
             "32k": ("UK/UKR-Pretrain-D.pth", "UK/UKR-Pretrain-G.pth"),
         },
-        "VocalCore": {
-            "48k": ("VocalCore/D_VocalCore.pth", "VocalCore/G_VocalCore.pth"),
-        },
-        "VocalCoreTry3b": {
-            "48k": ("VocalCore/D_VocalCoreTry3b.pth", "VocalCore/G_VocalCoreTry3b.pth"),
-        },
     },
     "MRF HiFi-GAN": {},
     "RefineGAN": {},

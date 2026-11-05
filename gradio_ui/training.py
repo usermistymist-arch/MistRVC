@@ -20,16 +20,14 @@ from assets.model_installer import (
     download_with_progress,
     ensure_pretrains,
 )
-from assets.notebook_check import colab_check, kaggle_check
 from assets.pretrains import NO_PRETRAIN, default_pretrain, pretrain_choices
 from gradio_ui.jobs import command, request_stop, run_job
-from gradio_ui.tensorboard import DEFAULT_TENSORBOARD_PORT, launch_tensorboard
 
 SAMPLE_RATES = [32000, 40000, 48000]
 DEFAULT_VOCODER = "HiFi-GAN"
 VOCODERS = ["HiFi-GAN", "MRF HiFi-GAN", "RefineGAN"]
 OPTIMIZERS = ["AdamW", "AdaBelief", "PolOpt"]
-F0_METHODS = ["rmvpe", "rmvpe+", "hpa-rmvpe"]
+F0_METHODS = ["rmvpe", "hpa-rmvpe"]
 AUDIO_EXTENSIONS = (
     ".wav",
     ".mp3",
@@ -113,33 +111,6 @@ def _refresh_pretrains(vocoder, sample_rate, current):
     choices = pretrain_choices(vocoder, sample_rate)
     value = current if current in choices else default_pretrain(vocoder, sample_rate)
     return gr.update(choices=choices, value=value)
-
-
-def _open_board(port, base_url):
-    """Запускает TensorBoard и возвращает HTML для встраивания."""
-    logs_dir = _require_logs_dir()
-    if colab_check() or kaggle_check():
-        # В блокнотах браузер не видит localhost рантайма —
-        # графики открываются магией %tensorboard в ячейке.
-        return (
-            "<p>В Colab/Kaggle встроенный просмотр недоступен.</p>"
-            "<p>Вставьте в отдельную ячейку блокнота:</p>"
-            f"<pre>%load_ext tensorboard\n%tensorboard --logdir {logs_dir}</pre>"
-        )
-    url = launch_tensorboard(logs_dir, int(port or DEFAULT_TENSORBOARD_PORT))
-    if url.startswith("Ошибка"):
-        return f"<p style='color:#e5534b'>{url}</p>"
-
-    # В обратном прокси адрес из launch() недостижим из браузера —
-    # тогда подставляется явно указанный базовый адрес.
-    if base_url and base_url.strip():
-        query = url.split("?", 1)[1] if "?" in url else ""
-        url = (
-            f"{base_url.strip().rstrip('/')}/?{query}"
-            if query
-            else base_url.strip().rstrip("/")
-        )
-    return f'<iframe src="{url}" width="100%" height="780" frameborder="0" title="TensorBoard"></iframe>'
 
 
 def _input_root(model_name: str, files, folder: str) -> str:
@@ -387,7 +358,7 @@ def training_tab():
     model_name = gr.Textbox(label="Имя модели", placeholder="MyVoice")
 
     with (
-        gr.Accordion("Подготовка данных", open=False),
+        gr.Accordion("Подготовка данных", open=True),
         gr.Group(),
         gr.Row(equal_height=True),
     ):
@@ -403,7 +374,7 @@ def training_tab():
                 sample_rate = gr.Dropdown(
                     SAMPLE_RATES, value=48000, label="Частота (Hz)"
                 )
-                f0_method = gr.Dropdown(F0_METHODS, value="rmvpe", label="Метод F0")
+                f0_method = gr.Dropdown(F0_METHODS, value="hpa-rmvpe", label="Метод F0")
                 normalize = gr.Checkbox(value=True, label="Нормализация")
             with gr.Row(equal_height=True):
                 segment_len = gr.Slider(
@@ -433,7 +404,7 @@ def training_tab():
                 minimum=1, maximum=100, step=1, value=25, label="Сохранять каждые N"
             )
             batch_size = gr.Slider(
-                minimum=1, maximum=128, step=1, value=8, label="Батч"
+                minimum=1, maximum=128, step=1, value=14, label="Батч"
             )
         with gr.Accordion("Дополнительно", open=False):
             with gr.Row(equal_height=True):
@@ -459,7 +430,7 @@ def training_tab():
                 )
             with gr.Row(equal_height=True):
                 save_to_zip = gr.Checkbox(False, label="Собрать ZIP в конце")
-                save_half = gr.Checkbox(True, label="Веса float16")
+                save_half = gr.Checkbox(False, label="Веса float16")
         with gr.Row(equal_height=True):
             train_btn = gr.Button("Запустить обучение", variant="primary")
             stop_btn = gr.Button("Завершить процесс", variant="stop")
@@ -467,20 +438,6 @@ def training_tab():
 
     with gr.Group():
         log = gr.Textbox(label="Журнал", lines=12, max_lines=12)
-        board_btn = gr.Button("📊 TensorBoard", variant="secondary")
-        with (
-            gr.Accordion("Параметры TensorBoard", open=False),
-            gr.Row(equal_height=True),
-        ):
-            board_port = gr.Number(
-                value=DEFAULT_TENSORBOARD_PORT, label="Порт", precision=0
-            )
-            board_base_url = gr.Textbox(
-                label="Базовый адрес (за прокси)",
-                placeholder="http://127.0.0.1:6006/tensorboard",
-                info="Оставьте пустым при запуске на своём компьютере.",
-            )
-        board_frame = gr.HTML("")
 
     step_buttons = [slice_btn, extract_btn, index_btn]
     model_name.change(
@@ -535,8 +492,5 @@ def training_tab():
         inputs=model_name,
         outputs=step_buttons,
         api_name=False,
-    )
-    board_btn.click(
-        _open_board, inputs=[board_port, board_base_url], outputs=board_frame
     )
     stop_btn.click(request_stop, outputs=stop_status, queue=False, api_name=False)

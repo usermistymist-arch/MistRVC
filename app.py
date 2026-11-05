@@ -7,6 +7,8 @@ from typing import Any
 
 import torch
 
+from gradio_ui.settings import DEFAULT_SETTINGS, load_settings
+
 # Configuring the environment and logging
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"  # Disable unnecessary TensorFlow logs
 os.environ["TF_ENABLE_ONEDNN_OPTS"] = (
@@ -89,24 +91,24 @@ def get_title() -> str:
 
 
 # Gradio Interface
+
+# Загружаем настройки и получаем цвет
+settings = load_settings()
+theme_color = settings.get("theme_color", DEFAULT_SETTINGS["theme_color"])
+
 with gr.Blocks(
     title=get_title(),
     css=APP_CSS,
     theme=gr.themes.Soft(
-        primary_hue="indigo",
+        primary_hue=theme_color,
         secondary_hue="slate",
         neutral_hue="neutral",
         spacing_size="sm",
         radius_size="lg",
     ),
 ) as MistRVC:
-    gr.Markdown(
-        elem_classes=["app-header"],
-        value=f"# MistRVC <small>v{__version__}</small>",
-    )
-
     with gr.Tab("Конвертация") as conversion_tab_ui:
-        conversion_tab(include_tts=not is_offline_mode())
+        conversion_tab()
     # список обновляем при каждом открытии вкладки, а не только кнопкой.
     conversion_tab_ui.select(refresh_models, outputs=model_dropdowns(), api_name=False)
 
@@ -129,6 +131,11 @@ with gr.Blocks(
 
     with gr.Tab("Инструменты"):
         tools_tab()
+
+    with gr.Tab("Настройки"):
+        from gradio_ui.settings import settings_tab
+
+        settings_tab()
 
 
 def launch_gradio(server_name: str, server_port: int) -> None:

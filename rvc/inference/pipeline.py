@@ -12,8 +12,6 @@ from rvc._library.predictors.f0 import (
     CREPEF0,
     FCPEF0,
     RMVPEF0,
-    AutoTune,
-    calc_pitch_shift,
 )
 
 # Фильтр Баттерворта для высоких частот
@@ -79,25 +77,10 @@ class VC:
         self.t_max = self.sample_rate * self.x_max
         self.device = config.device
 
-    def get_f0(
-        self,
-        audio,
-        p_len,
-        pitch,
-        f0_min,
-        f0_max,
-        f0_method,
-        autopitch,
-        autopitch_threshold,
-        autotune,
-        autotune_tonic,
-        autotune_scale,
-        autotune_strength,
-    ):
+    def get_f0(self, audio, p_len, pitch, f0_min, f0_max, f0_method):
         """Получает F0 с использованием выбранного метода."""
         f0 = None
         f0_mel_min = 1127 * np.log(1 + f0_min / 700)
-        f0_mel_max = 1127 * np.log(1 + f0_max / 700)
 
         if f0_method in ("crepe", "crepe-tiny"):
             model = CREPEF0(
@@ -111,7 +94,7 @@ class VC:
                 ("full" if f0_method == "crepe" else "tiny"),
             )
             del model
-        elif f0_method in ("rmvpe", "rmvpe+", "hpa-rmvpe"):
+        elif f0_method in ("rmvpe", "hpa-rmvpe"):
             model = RMVPEF0(device=self.device, sample_rate=self.sample_rate)
             f0 = model.get_f0(audio, f0_min, f0_max, f0_method)
             del model
@@ -125,21 +108,12 @@ class VC:
         if f0 is None:
             raise ValueError("Метод F0 не распознан или не смог рассчитать F0.")
 
-        # АвтоПитч (автоматическое определение высоты тона)
-        if autopitch is True:
-            pitch += calc_pitch_shift(f0, autopitch_threshold, 12)
-
-        # АвтоТюн (коррекция высоты тона)
-        if autotune is True:
-            AT = AutoTune(scale_name=autotune_scale, tonic_note=autotune_tonic)
-            f0 = AT.apply_autotune(f0, autotune_strength)
-
         f0 = np.multiply(f0, pow(2, pitch / 12))
         f0_mel = 1127 * np.log(1 + f0 / 700)
-        
+
         # Расширенный диапазон для квантования: покрывает до C#7 (2218 Hz) после питч-шифта
         extended_f0_mel_max = 1127 * np.log(1 + 2218 / 700)
-        
+
         f0_mel[f0_mel > 0] = (f0_mel[f0_mel > 0] - f0_mel_min) * 254 / (
             extended_f0_mel_max - f0_mel_min
         ) + 1
@@ -245,12 +219,6 @@ class VC:
         index_rate,
         volume_envelope,
         protect,
-        autopitch,
-        autopitch_threshold,
-        autotune,
-        autotune_tonic,
-        autotune_scale,
-        autotune_strength,
     ):
         """Основной конвейер для преобразования аудио."""
         index = big_npy = None
@@ -283,20 +251,7 @@ class VC:
         p_len = audio_pad.shape[0] // self.window
         sid = torch.tensor(sid, device=self.device).unsqueeze(0).long()
 
-        pitch, pitchf = self.get_f0(
-            audio_pad,
-            p_len,
-            pitch,
-            f0_min,
-            f0_max,
-            f0_method,
-            autopitch,
-            autopitch_threshold,
-            autotune,
-            autotune_tonic,
-            autotune_scale,
-            autotune_strength,
-        )
+        pitch, pitchf = self.get_f0(audio_pad, p_len, pitch, f0_min, f0_max, f0_method)
         pitch = pitch[:p_len]
         pitchf = pitchf[:p_len]
 

@@ -21,16 +21,19 @@ PROJECT_ROOT = os.path.dirname(
     os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 )
 sys.path.append(PROJECT_ROOT)
+import re
+
 from rvc._library.audio import load_audio
 from rvc._library.embedders.fairseq import load_model
 from rvc._library.predictors.f0 import RMVPEF0
 
-import re
 
 def natural_sort_key(s):
     """Ключ для натуральной сортировки: числа сравниваются как числа."""
-    return [int(text) if text.isdigit() else text.lower() 
-            for text in re.split(r'(\d+)', s)]
+    return [
+        int(text) if text.isdigit() else text.lower() for text in re.split(r"(\d+)", s)
+    ]
+
 
 exp_dir = str(
     sys.argv[1]
@@ -113,10 +116,12 @@ class DataPreprocessor:
     def process_files(self):
         cache_root = f"{exp_dir}/data/sliced_audios_16k"
         gt_root = f"{exp_dir}/data/sliced_audios"
-        
+
         # Проверяем, есть ли подпапки (мульти-спикер)
-        speaker_dirs = [d for d in os.listdir(gt_root) if os.path.isdir(os.path.join(gt_root, d))]
-        
+        speaker_dirs = [
+            d for d in os.listdir(gt_root) if os.path.isdir(os.path.join(gt_root, d))
+        ]
+
         inp_root = cache_root
 
         f0_quant_path = f"{exp_dir}/data/f0_quantized"
@@ -140,7 +145,7 @@ class DataPreprocessor:
             for f in os.listdir(inp_root):
                 if f.endswith(".wav"):
                     files_to_process.append(("", f))
-                    
+
         if not files_to_process:
             self._raise_no_files_error()
 
@@ -154,24 +159,41 @@ class DataPreprocessor:
             ncols=80,
         ):
             try:
-                inp_path = os.path.join(inp_root, speaker_dir, file) if speaker_dir else os.path.join(inp_root, file)
-                
-                f0_quant_dir = os.path.join(f0_quant_path, speaker_dir) if speaker_dir else f0_quant_path
-                f0_voiced_dir = os.path.join(f0_voiced_path, speaker_dir) if speaker_dir else f0_voiced_path
-                
+                inp_path = (
+                    os.path.join(inp_root, speaker_dir, file)
+                    if speaker_dir
+                    else os.path.join(inp_root, file)
+                )
+
+                f0_quant_dir = (
+                    os.path.join(f0_quant_path, speaker_dir)
+                    if speaker_dir
+                    else f0_quant_path
+                )
+                f0_voiced_dir = (
+                    os.path.join(f0_voiced_path, speaker_dir)
+                    if speaker_dir
+                    else f0_voiced_path
+                )
+
                 os.makedirs(f0_quant_dir, exist_ok=True)
                 os.makedirs(f0_voiced_dir, exist_ok=True)
-                
+
                 opt_path1 = os.path.join(f0_quant_dir, file)
                 opt_path2 = os.path.join(f0_voiced_dir, file)
 
-                if not (os.path.exists(opt_path1 + ".npy") and os.path.exists(opt_path2 + ".npy")):
+                if not (
+                    os.path.exists(opt_path1 + ".npy")
+                    and os.path.exists(opt_path2 + ".npy")
+                ):
                     featur_pit = self.compute_f0(inp_path, f0_method)
                     np.save(opt_path2, featur_pit, allow_pickle=False)
                     coarse_pit = self.coarse_f0(featur_pit)
                     np.save(opt_path1, coarse_pit, allow_pickle=False)
             except Exception:
-                raise RuntimeError(f"Ошибка извлечения тона!\nФайл - {inp_path}\n{traceback.format_exc()}")
+                raise RuntimeError(
+                    f"Ошибка извлечения тона!\nФайл - {inp_path}\n{traceback.format_exc()}"
+                )
 
         # Обработка HuBERT
         for speaker_dir, file in tqdm(
@@ -181,23 +203,35 @@ class DataPreprocessor:
             ncols=80,
         ):
             try:
-                wav_path = os.path.join(inp_root, speaker_dir, file) if speaker_dir else os.path.join(inp_root, file)
-                
-                features_dir = os.path.join(features_path, speaker_dir) if speaker_dir else features_path
+                wav_path = (
+                    os.path.join(inp_root, speaker_dir, file)
+                    if speaker_dir
+                    else os.path.join(inp_root, file)
+                )
+
+                features_dir = (
+                    os.path.join(features_path, speaker_dir)
+                    if speaker_dir
+                    else features_path
+                )
                 os.makedirs(features_dir, exist_ok=True)
-                
+
                 out_path = os.path.join(features_dir, file.replace(".wav", ".npy"))
 
                 if not os.path.exists(out_path):
                     feats = self.extract_features(wav_path)
                     if np.isnan(feats).sum() > 0:
-                        raise TypeError(f"Файл {file} содержит некорректные значения (NaN).")
+                        raise TypeError(
+                            f"Файл {file} содержит некорректные значения (NaN)."
+                        )
                     np.save(out_path, feats, allow_pickle=False)
             except Exception:
-                raise RuntimeError(f"Ошибка извлечения признаков!\nФайл - {wav_path}\n{traceback.format_exc()}")
+                raise RuntimeError(
+                    f"Ошибка извлечения признаков!\nФайл - {wav_path}\n{traceback.format_exc()}"
+                )
 
         print("✓ Извлечение акустических признаков успешно завершено!")
-        
+
     def _raise_no_files_error(self):
         error_message = (
             "ОШИБКА: Не найдено ни одного фрагмента для обработки.\n"
@@ -220,35 +254,53 @@ def generate_filelist(model_path: str, sample_rate: int, include_mutes: int = 2)
     f0nsf_dir = os.path.join(model_path, "data", "f0_voiced")
 
     options = []
-    
+
     # Получаем список папок спикеров
-    speaker_dirs = [d for d in os.listdir(gt_wavs_dir) if os.path.isdir(os.path.join(gt_wavs_dir, d))]
-    speaker_dirs.sort(key=natural_sort_key) # Для детерминированного порядка
-    
+    speaker_dirs = [
+        d
+        for d in os.listdir(gt_wavs_dir)
+        if os.path.isdir(os.path.join(gt_wavs_dir, d))
+    ]
+    speaker_dirs.sort(key=natural_sort_key)  # Для детерминированного порядка
+
     if not speaker_dirs:
         # Fallback на случай, если папок нет (старая структура)
         speaker_dirs = [""]
 
     for speaker_id_str in speaker_dirs:
-        speaker_gt_dir = os.path.join(gt_wavs_dir, speaker_id_str) if speaker_id_str else gt_wavs_dir
-        speaker_feature_dir = os.path.join(feature_dir, speaker_id_str) if speaker_id_str else feature_dir
-        speaker_f0_dir = os.path.join(f0_dir, speaker_id_str) if speaker_id_str else f0_dir
-        speaker_f0nsf_dir = os.path.join(f0nsf_dir, speaker_id_str) if speaker_id_str else f0nsf_dir
-        
+        speaker_gt_dir = (
+            os.path.join(gt_wavs_dir, speaker_id_str) if speaker_id_str else gt_wavs_dir
+        )
+        speaker_feature_dir = (
+            os.path.join(feature_dir, speaker_id_str) if speaker_id_str else feature_dir
+        )
+        speaker_f0_dir = (
+            os.path.join(f0_dir, speaker_id_str) if speaker_id_str else f0_dir
+        )
+        speaker_f0nsf_dir = (
+            os.path.join(f0nsf_dir, speaker_id_str) if speaker_id_str else f0nsf_dir
+        )
+
         if not os.path.isdir(speaker_gt_dir):
             continue
-            
-        gt_wavs_files = set(name.split(".")[0] for name in os.listdir(speaker_gt_dir) if name.endswith(".wav"))
-        
+
+        gt_wavs_files = set(
+            name.split(".")[0]
+            for name in os.listdir(speaker_gt_dir)
+            if name.endswith(".wav")
+        )
+
         valid_names = []
         for name in gt_wavs_files:
-            if (os.path.exists(os.path.join(speaker_feature_dir, f"{name}.npy")) and
-                os.path.exists(os.path.join(speaker_f0_dir, f"{name}.wav.npy")) and
-                os.path.exists(os.path.join(speaker_f0nsf_dir, f"{name}.wav.npy"))):
+            if (
+                os.path.exists(os.path.join(speaker_feature_dir, f"{name}.npy"))
+                and os.path.exists(os.path.join(speaker_f0_dir, f"{name}.wav.npy"))
+                and os.path.exists(os.path.join(speaker_f0nsf_dir, f"{name}.wav.npy"))
+            ):
                 valid_names.append(name)
-                
+
         speaker_id = int(speaker_id_str) if speaker_id_str else 0
-        
+
         for name in valid_names:
             options.append(
                 f"{os.path.join(speaker_gt_dir, name)}.wav|"
@@ -256,10 +308,12 @@ def generate_filelist(model_path: str, sample_rate: int, include_mutes: int = 2)
                 f"{os.path.join(speaker_f0_dir, name)}.wav.npy|"
                 f"{os.path.join(speaker_f0nsf_dir, name)}.wav.npy|{speaker_id}"
             )
-            
+
         # Добавляем мьют-файлы для каждого спикера
         if include_mutes > 0:
-            mute_audio_path = os.path.join(mute_base_path, "sliced_audios", f"mute{sample_rate}.wav")
+            mute_audio_path = os.path.join(
+                mute_base_path, "sliced_audios", f"mute{sample_rate}.wav"
+            )
             mute_feature_path = os.path.join(mute_base_path, "features", "mute.npy")
             mute_f0_path = os.path.join(mute_base_path, "f0_quantized", "mute.wav.npy")
             mute_f0nsf_path = os.path.join(mute_base_path, "f0_voiced", "mute.wav.npy")
@@ -275,7 +329,7 @@ def generate_filelist(model_path: str, sample_rate: int, include_mutes: int = 2)
         os.path.join(model_path, "data", "filelist.txt"), "w", encoding="utf-8"
     ) as f:
         f.write("\n".join(options))
-        
+
     # Сохраняем имена спикеров для инференса
     speakers_path = os.path.join(model_path, "speakers.txt")
     if speaker_dirs:

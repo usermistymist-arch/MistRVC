@@ -22,10 +22,14 @@ try:
         print(f"✓ Индекс уже существует - '{index_filepath}'. Пропускаем генерацию.")
     else:
         npys = []
-        
+
         # Проверяем, есть ли подпапки (мульти-спикер)
-        speaker_dirs = [d for d in os.listdir(feature_dir) if os.path.isdir(os.path.join(feature_dir, d))]
-        
+        speaker_dirs = [
+            d
+            for d in os.listdir(feature_dir)
+            if os.path.isdir(os.path.join(feature_dir, d))
+        ]
+
         files_to_process = []
         if speaker_dirs:
             for speaker_dir in speaker_dirs:
@@ -37,7 +41,7 @@ try:
             for f in os.listdir(feature_dir):
                 if f.endswith(".npy"):
                     files_to_process.append(os.path.join(feature_dir, f))
-                    
+
         files_to_process.sort()
 
         # ncols фиксируем, чтобы при сломанном определении ширины терминала tqdm не игнорировал bar_format

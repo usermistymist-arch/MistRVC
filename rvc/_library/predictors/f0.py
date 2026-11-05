@@ -182,16 +182,11 @@ class RMVPEF0:
         if type_rmvpe == "rmvpe":
             return self.model_og.infer_from_audio(audio, thred=0.03)
 
-        if type_rmvpe == "rmvpe+":
-            return self.model_og.infer_from_audio_medfilt(
-                audio, thred=0.02, f0_min=f0_min, f0_max=f0_max
-            )
-
         if type_rmvpe == "hpa-rmvpe":
             return self.model_hpa.infer_from_audio(audio, thred=0.03)
 
         raise ValueError(
-            f"Недопустимое значение: {type_rmvpe!r}. Доступные варианты: 'rmvpe', 'rmvpe+' и 'hpa-rmvpe'."
+            f"Недопустимое значение: {type_rmvpe!r}. Доступные варианты: 'rmvpe' и 'hpa-rmvpe'."
         )
 
 

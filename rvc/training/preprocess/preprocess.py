@@ -108,7 +108,7 @@ class PreProcess:
         os.makedirs(speaker_16k_dir, exist_ok=True)
 
         filename = f"{speaker_id}_{idx0}_{idx1}.wav"
-        
+
         wavfile.write(
             os.path.join(speaker_gt_dir, filename),
             self.sample_rate,
@@ -129,35 +129,45 @@ class PreProcess:
         try:
             # Проверяем, есть ли подпапки с аудиофайлами
             subdirs = [
-                d for d in os.listdir(input_root)
+                d
+                for d in os.listdir(input_root)
                 if os.path.isdir(os.path.join(input_root, d))
             ]
-            
+
             has_subdirs_with_audio = False
             for d in subdirs:
                 dir_path = os.path.join(input_root, d)
-                if any(is_audio_file(os.path.join(dir_path, f)) for f in os.listdir(dir_path)):
+                if any(
+                    is_audio_file(os.path.join(dir_path, f))
+                    for f in os.listdir(dir_path)
+                ):
                     has_subdirs_with_audio = True
                     break
 
             if has_subdirs_with_audio:
-                print(f"Датасет разделён на папки, количество спикеров в датасете: {len(subdirs)}")
+                print(
+                    f"Датасет разделён на папки, количество спикеров в датасете: {len(subdirs)}"
+                )
                 # Сортируем подпапки для детерминированного порядка speaker_id
                 subdirs.sort()
                 for speaker_id, subdir in enumerate(subdirs):
                     dir_path = os.path.join(input_root, subdir)
                     names = sorted(
-                        name for name in os.listdir(dir_path)
+                        name
+                        for name in os.listdir(dir_path)
                         if is_audio_file(os.path.join(dir_path, name))
                     )
                     if not names:
                         continue
-                    print(f"[Спикер {speaker_id}] - Запуск процесса сегментации аудиоданных...")
+                    print(
+                        f"[Спикер {speaker_id}] - Запуск процесса сегментации аудиоданных..."
+                    )
                     self._process_directory(dir_path, speaker_id, names)
             else:
                 print("Датасет не разделён на спикеров, используется спикер айди 0")
                 names = sorted(
-                    name for name in os.listdir(input_root)
+                    name
+                    for name in os.listdir(input_root)
                     if is_audio_file(os.path.join(input_root, name))
                 )
                 if not names:
@@ -189,25 +199,39 @@ class PreProcess:
                     for audio_segment in self.slicer.slice(audio):
                         i = 0
                         while True:
-                            start = int(self.sample_rate * (self.percentage - self.overlap) * i)
+                            start = int(
+                                self.sample_rate * (self.percentage - self.overlap) * i
+                            )
                             i += 1
-                            if len(audio_segment[start:]) > self.tail * self.sample_rate:
-                                tmp_audio = audio_segment[start : start + int(self.percentage * self.sample_rate)]
-                                total_segments += self.norm_write(tmp_audio, speaker_id, idx, idx1)
+                            if (
+                                len(audio_segment[start:])
+                                > self.tail * self.sample_rate
+                            ):
+                                tmp_audio = audio_segment[
+                                    start : start
+                                    + int(self.percentage * self.sample_rate)
+                                ]
+                                total_segments += self.norm_write(
+                                    tmp_audio, speaker_id, idx, idx1
+                                )
                                 idx1 += 1
                                 if time.monotonic() - last_paint >= 0.1:
                                     last_paint = time.monotonic()
-                                    pbar.postfix = Postfix(f" [сегментов: {total_segments}]")
+                                    pbar.postfix = Postfix(
+                                        f" [сегментов: {total_segments}]"
+                                    )
                                     pbar.refresh()
                             else:
                                 tmp_audio = audio_segment[start:]
                                 if len(tmp_audio) > 0:
-                                    total_segments += self.norm_write(tmp_audio, speaker_id, idx, idx1)
+                                    total_segments += self.norm_write(
+                                        tmp_audio, speaker_id, idx, idx1
+                                    )
                                     idx1 += 1
                                 break
                 except Exception:
                     raise RuntimeError(f"{path}\t-> {traceback.format_exc()}")
-                
+
                 pbar.update(1)
                 pbar.postfix = Postfix(f" [сегментов: {total_segments}]")
                 pbar.refresh()
