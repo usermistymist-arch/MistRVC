@@ -128,22 +128,38 @@ def get_vc(model_path):
 
 
 # Собирает путь выходного файла вида `<имя>_(<модель>).<формат>`
-def build_output_path(input_path, output_dir, rvc_model, output_format, speaker_name=None, filename_template="{NAME}_({MODEL}_{SPEAKER})"):
+def build_output_path(
+    input_path,
+    output_dir,
+    rvc_model,
+    output_format,
+    speaker_name=None,
+    filename_template="{NAME}_({MODEL}_{SPEAKER})",
+    rvc_pitch=0,
+):
     base_name = os.path.splitext(os.path.basename(input_path))[0]
     if len(base_name) > 100:
         gr.Warning("Имя файла превышает 100 символов и будет сокращено для удобства.")
         base_name = f"{base_name[:25]}... (MistRVC)"
     os.makedirs(output_dir, exist_ok=True)
-    
+
     speaker_str = speaker_name if speaker_name else ""
-    filename = filename_template.replace("{NAME}", base_name)\
-                                .replace("{MODEL}", rvc_model)\
-                                .replace("{SPEAKER}", speaker_str)
-    
+    pitch_shift_str = f"{rvc_pitch:+g}" if rvc_pitch != 0 else ""
+    filename = (
+        filename_template.replace("{NAME}", base_name)
+        .replace("{MODEL}", rvc_model)
+        .replace("{SPEAKER}", speaker_str)
+        .replace("{PITCH_SHIFT}", pitch_shift_str)
+    )
+
     # Очистка от лишних символов, если SPEAKER пустой (например, "_{SPEAKER}" -> "")
     if not speaker_str:
-        filename = filename.replace("_{SPEAKER}", "").replace("{SPEAKER}_", "").replace("{SPEAKER}", "")
-        
+        filename = (
+            filename.replace("_{SPEAKER}", "")
+            .replace("{SPEAKER}_", "")
+            .replace("{SPEAKER}", "")
+        )
+
     return os.path.join(output_dir, f"{filename}.{output_format}")
 
 
@@ -315,7 +331,13 @@ def rvc_infer(
     # Пайплайн остаётся в памяти: следующий запуск этой же модели стартует сразу.
     pipe = get_pipeline(rvc_model)
     output_path = build_output_path(
-        input_path, OUTPUT_DIR, rvc_model, output_format, speaker_name, filename_template
+        input_path,
+        OUTPUT_DIR,
+        rvc_model,
+        output_format,
+        speaker_name,
+        filename_template,
+        rvc_pitch,
     )
     convert_one(
         pipe,
@@ -400,7 +422,13 @@ def rvc_batch_infer(
         )
         try:
             output_path = build_output_path(
-                input_path, target_dir, rvc_model, output_format, speaker_name, filename_template
+                input_path,
+                target_dir,
+                rvc_model,
+                output_format,
+                speaker_name,
+                filename_template,
+                rvc_pitch,
             )
             convert_one(
                 pipe,

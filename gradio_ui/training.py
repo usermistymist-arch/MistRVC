@@ -43,12 +43,11 @@ AUDIO_EXTENSIONS = (
 )
 
 
-def _section_hint(code1: str, code2: str):
+def _section_hint(code1: str):
     """Центрированная подсказка под заголовком секции обучения."""
     return gr.HTML(
         "<div style='font-size:13px;opacity:0.85;text-align:center;padding:0 4px 8px;'>"
-        f"Если в папке модели есть <code>{code1}</code>, обучение продолжится с него. "
-        f"Метрики: <code>{code2}</code>.</div>",
+        f"Если в папке модели есть <code>{code1}</code>, обучение продолжится с него.</div>",
     )
 
 
@@ -395,18 +394,18 @@ def training_tab():
                 index_btn = gr.Button("3. Построить индекс", interactive=False)
 
     with gr.Group():
-        _section_hint("checkpoint.pth", "tensorboard --logdir logs")
+        _section_hint("checkpoint.pth")
         with gr.Row(equal_height=True):
             total_epoch = gr.Slider(
-                minimum=1, maximum=10000, step=1, value=300, label="Всего эпох"
+                minimum=1, maximum=5000, step=1, value=500, label="Всего эпох"
             )
             save_every_epoch = gr.Slider(
-                minimum=1, maximum=100, step=1, value=25, label="Сохранять каждые N"
+                minimum=1, maximum=200, step=1, value=20, label="Сохранять каждые N"
             )
             batch_size = gr.Slider(
                 minimum=1, maximum=128, step=1, value=14, label="Батч"
             )
-        with gr.Accordion("Дополнительно", open=False):
+        with gr.Accordion("Дополнительно", open=True):
             with gr.Row(equal_height=True):
                 vocoder = gr.Dropdown(VOCODERS, value=DEFAULT_VOCODER, label="Вокодер")
                 optimizer = gr.Dropdown(OPTIMIZERS, value="AdamW", label="Оптимизатор")
@@ -430,14 +429,14 @@ def training_tab():
                 )
             with gr.Row(equal_height=True):
                 save_to_zip = gr.Checkbox(False, label="Собрать ZIP в конце")
-                save_half = gr.Checkbox(False, label="Веса float16")
+                save_half = gr.Checkbox(False, label="Половинная точность")
         with gr.Row(equal_height=True):
             train_btn = gr.Button("Запустить обучение", variant="primary")
             stop_btn = gr.Button("Завершить процесс", variant="stop")
         stop_status = gr.Markdown("")
 
     with gr.Group():
-        log = gr.Textbox(label="Журнал", lines=12, max_lines=12)
+        log = gr.Textbox(label="Журнал", lines=24, max_lines=24)
 
     step_buttons = [slice_btn, extract_btn, index_btn]
     model_name.change(

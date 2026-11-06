@@ -1,12 +1,6 @@
 name: Code Formatter
 
 on:
-  push:
-    branches:
-      - main
-    paths:
-      - '**/*.py'
-      - '.github/workflows/code_formatter.yml'
   pull_request:
     paths:
       - '**/*.py'
@@ -14,7 +8,6 @@ on:
 
 jobs:
   check:
-    if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -22,10 +15,10 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v7
+        uses: actions/checkout@v4
 
       - name: Set up Python
-        uses: actions/setup-python@v7
+        uses: actions/setup-python@v5
         with:
           python-version: '3.13'
 
@@ -35,60 +28,17 @@ jobs:
       - name: Run Ruff Formatter (check)
         run: ruff format --check .
 
-      - name: Run Ruff Linter (критичные правила)
+      - name: Run Ruff Linter (critical rules)
         run: ruff check --select F,E9 .
 
-      - name: Сводка по полному набору правил
+      - name: Summary of all rules
         if: ${{ always() }}
         run: |
           ruff check . --statistics > ruff_full.log 2>&1 || true
           {
-            echo "## Ruff: статистика по правилам из \`ruff.toml\` (\`select = ALL\`)"
+            echo "## Ruff: statistics for rules from \`ruff.toml\` (\`select = ALL\`)"
             echo
             echo '```'
             head -40 ruff_full.log
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
-
-  format_code:
-    if: github.event_name == 'push'
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-
-    permissions:
-      contents: write
-      pull-requests: write
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v7
-
-      - name: Set up Python
-        uses: actions/setup-python@v7
-        with:
-          python-version: '3.13'
-
-      - name: Install dependencies
-        run: pip install -U ruff
-
-      - name: Run Ruff Linter (with auto-fix)
-        run: ruff check . --fix || true
-
-      - name: Run Ruff Formatter
-        run: ruff format . || true
-
-      - name: Check for changes
-        id: changes
-        run: |
-          if git diff --quiet; then
-            echo "has_changes=false" >> "$GITHUB_OUTPUT"
-          else
-            echo "has_changes=true" >> "$GITHUB_OUTPUT"
-          fi
-          git diff --stat >> "$GITHUB_STEP_SUMMARY" || true
-
-      - name: Fail if changes detected
-        if: steps.changes.outputs.has_changes == 'true'
-        run: |
-          echo "❌ Код не отформатирован. Запусти 'ruff format .' и 'ruff check --fix .' локально перед коммитом."
-          exit 1

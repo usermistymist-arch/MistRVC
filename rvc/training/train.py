@@ -372,6 +372,37 @@ def run(hps, rank, n_gpus, device, device_id):
                     ]
                 )
 
+                # Переинициализация строк emb_g
+                # Default претрейн содержит одинаковые строки emb_g (0 и 1): такие спикеры
+                # получают одинаковое условие и звучат одним голосом. Разводим
+                # строки своих спикеров случайной инициализацией того же масштаба.
+                if rank == 0:
+                    print("[ФИКС] Переинициализация emb_g...", flush=True)
+                n_spk = hps.model.spk_embed_dim  # fallback: 109 из конфига
+                speakers_path = os.path.join(hps.model_dir, "speakers.txt")
+                if os.path.exists(speakers_path):
+                    with open(speakers_path, encoding="utf-8") as file:
+                        lines = [line for line in file if line.strip()]
+                    if lines:
+                        n_spk = len(lines)
+                n_spk = min(
+                    n_spk, g_model.emb_g.weight.shape[0]
+                )  # защита от >109 спикеров
+
+                with torch.no_grad():
+                    weight = g_model.emb_g.weight.data
+                    rows = weight[:n_spk]
+                    # Масштаб = средняя норма строки претрейна / sqrt(gin_channels)
+                    # Это сохраняет тот же порядок величин, к которому привык декодер
+                    scale = float(rows.norm(dim=1).mean()) / (weight.shape[1] ** 0.5)
+                    rows.normal_(0.0, scale)
+
+                if rank == 0:
+                    print(
+                        f"[ФИКС] emb_g переинициализирован для {n_spk} спикеров (масштаб: {scale:.4f}).\n",
+                        flush=True,
+                    )
+
             if hps.pretrain_d not in ("", "None", None):
                 if rank == 0:
                     print(

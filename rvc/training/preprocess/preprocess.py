@@ -14,8 +14,18 @@ sys.path.append(
         os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     )
 )
+import re
+
 from rvc._library.audio import load_audio
 from rvc.training.preprocess.slicer import Slicer
+
+
+def natural_sort_key(s):
+    """Ключ для натуральной сортировки: числа сравниваются как числа."""
+    return [
+        int(text) if text.isdigit() else text.lower() for text in re.split(r"(\d+)", s)
+    ]
+
 
 # Парсинг аргументов командной строки
 exp_dir = sys.argv[1]  # Директория для сохранения результатов
@@ -90,7 +100,7 @@ class PreProcess:
         self.tail = self.percentage + self.overlap  # Хвост для обработки
         self.normalize = normalize  # Флаг для включения/выключения нормализации
 
-    def norm_write(self, tmp_audio, speaker_id, idx0, idx1):
+    def norm_write(self, tmp_audio, speaker_name, idx0, idx1):
         if self.normalize:
             tmp_max = np.abs(tmp_audio).max()
             if tmp_max > 0:
@@ -101,13 +111,14 @@ class PreProcess:
                 if peak > 1.0:
                     tmp_audio = tmp_audio * (1.0 / peak)
 
-        # Создаем папку для спикера, если её нет
-        speaker_gt_dir = os.path.join(self.gt_wavs_dir, str(speaker_id))
-        speaker_16k_dir = os.path.join(self.wavs16k_dir, str(speaker_id))
+        # Создаем папку для спикера с ОРИГИНАЛЬНЫМ именем
+        speaker_gt_dir = os.path.join(self.gt_wavs_dir, speaker_name)
+        speaker_16k_dir = os.path.join(self.wavs16k_dir, speaker_name)
         os.makedirs(speaker_gt_dir, exist_ok=True)
         os.makedirs(speaker_16k_dir, exist_ok=True)
 
-        filename = f"{speaker_id}_{idx0}_{idx1}.wav"
+        # Имя файла начинается с оригинального имени спикера
+        filename = f"{speaker_name}_{idx0}_{idx1}.wav"
 
         wavfile.write(
             os.path.join(speaker_gt_dir, filename),
@@ -148,8 +159,8 @@ class PreProcess:
                 print(
                     f"Датасет разделён на папки, количество спикеров в датасете: {len(subdirs)}"
                 )
-                # Сортируем подпапки для детерминированного порядка speaker_id
-                subdirs.sort()
+                # Сортируем подпапки для детерминированного порядка
+                subdirs.sort(key=natural_sort_key)
                 for speaker_id, subdir in enumerate(subdirs):
                     dir_path = os.path.join(input_root, subdir)
                     names = sorted(
@@ -160,11 +171,13 @@ class PreProcess:
                     if not names:
                         continue
                     print(
-                        f"[Спикер {speaker_id}] - Запуск процесса сегментации аудиоданных..."
+                        f"[Спикер {speaker_id} ({subdir})] - Запуск процесса сегментации аудиоданных..."
                     )
-                    self._process_directory(dir_path, speaker_id, names)
+                    self._process_directory(dir_path, subdir, names)
             else:
-                print("Датасет не разделён на спикеров, используется спикер айди 0")
+                print(
+                    "Датасет не разделён на спикеров, используется имя 'default_speaker'"
+                )
                 names = sorted(
                     name
                     for name in os.listdir(input_root)
@@ -174,17 +187,17 @@ class PreProcess:
                     raise FileNotFoundError(
                         f"В папке '{input_root}' не найдено ни одного аудиофайла (поддерживаются: {', '.join(sorted(AUDIO_EXTENSIONS))}).",
                     )
-                self._process_directory(input_root, 0, names)
+                self._process_directory(input_root, "default_speaker", names)
 
             print("✓ Сегментация успешно завершена!")
         except Exception:
             raise RuntimeError(f"Ошибка! {traceback.format_exc()}")
 
-    def _process_directory(self, dir_path, speaker_id, names):
+    def _process_directory(self, dir_path, speaker_name, names):
         total_segments = 0
         with tqdm(
             total=len(names),
-            desc=f"Сегментация (спикер {speaker_id})",
+            desc=f"Сегментация (спикер {speaker_name})",
             bar_format="{desc}: {n}/{total}{postfix}",
             ncols=80,
         ) as pbar:
@@ -212,7 +225,7 @@ class PreProcess:
                                     + int(self.percentage * self.sample_rate)
                                 ]
                                 total_segments += self.norm_write(
-                                    tmp_audio, speaker_id, idx, idx1
+                                    tmp_audio, speaker_name, idx, idx1
                                 )
                                 idx1 += 1
                                 if time.monotonic() - last_paint >= 0.1:
@@ -225,7 +238,7 @@ class PreProcess:
                                 tmp_audio = audio_segment[start:]
                                 if len(tmp_audio) > 0:
                                     total_segments += self.norm_write(
-                                        tmp_audio, speaker_id, idx, idx1
+                                        tmp_audio, speaker_name, idx, idx1
                                     )
                                     idx1 += 1
                                 break

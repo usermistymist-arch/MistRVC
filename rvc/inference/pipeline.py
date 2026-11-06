@@ -227,7 +227,11 @@ class VC:
                 index = faiss.read_index(file_index)
                 big_npy = index.reconstruct_n(0, index.ntotal)
             except Exception as error:
-                print(f"Произошла ошибка при чтении индекса FAISS: {error}")
+                import logging
+
+                logging.warning(
+                    f"Не удалось загрузить индекс FAISS: {error}. Инференс продолжится без него."
+                )
 
         opt_ts = []
         audio = signal.filtfilt(bh, ah, audio)

@@ -1,6 +1,7 @@
 """Вкладка «Конвертация»: одиночная и пакетная замена голоса (классический вид)."""
 
 import os
+import sys
 from datetime import datetime
 
 import gradio as gr
@@ -15,7 +16,7 @@ from gradio_ui.common import (
     swap_buttons,
     swap_visibility,
 )
-from gradio_ui.settings import load_settings, DEFAULT_SETTINGS, update_filename_template
+from gradio_ui.settings import DEFAULT_SETTINGS, load_settings, update_filename_template
 
 
 def _get_speaker_update(model_name: str):
@@ -80,13 +81,16 @@ def _convert(
     from rvc.inference.infer import rvc_infer
 
     settings = load_settings()
-    filename_template = settings.get("infer_name_template", "{NAME}_({MODEL}_{SPEAKER})")
+    filename_template = settings.get(
+        "infer_name_template", "{NAME}_({MODEL}_{SPEAKER})"
+    )
 
     # Преобразуем имя спикера в ID и получаем его текстовое имя
     speaker_id_int = 0
     speaker_name = ""
     if speaker_id is not None and isinstance(speaker_id, str):
         from gradio_ui.common import RVC_MODELS_DIR
+
         model_dir = os.path.join(RVC_MODELS_DIR, rvc_model)
         speakers_path = os.path.join(model_dir, "speakers.txt")
         if os.path.exists(speakers_path):
@@ -134,13 +138,16 @@ def _convert_batch(
     from rvc.inference.infer import rvc_batch_infer
 
     settings = load_settings()
-    filename_template = settings.get("infer_name_template", "{NAME}_({MODEL}_{SPEAKER})")
+    filename_template = settings.get(
+        "infer_name_template", "{NAME}_({MODEL}_{SPEAKER})"
+    )
 
     # Преобразуем имя спикера в ID и получаем его текстовое имя
     speaker_id_int = 0
     speaker_name = ""
     if speaker_id is not None and isinstance(speaker_id, str):
         from gradio_ui.common import RVC_MODELS_DIR
+
         model_dir = os.path.join(RVC_MODELS_DIR, rvc_model)
         speakers_path = os.path.join(model_dir, "speakers.txt")
         if os.path.exists(speakers_path):
@@ -364,22 +371,27 @@ def _batch_conversion_tab():
         outputs=[batch_result],
     )
 
+
 def _conversion_settings_tab():
     """Подвкладка с настройками, специфичными для конвертации."""
     settings = load_settings()
-    current_template = settings.get("infer_name_template", DEFAULT_SETTINGS["infer_name_template"])
-    
+    current_template = settings.get(
+        "infer_name_template", DEFAULT_SETTINGS["infer_name_template"]
+    )
+
     with gr.Column():
         gr.Markdown("### 📁 Именование файлов")
         gr.Markdown(
-            "Шаблон имени выходного файла при конвертации. Доступные ключи: `{NAME}`, `{MODEL}`, `{SPEAKER}`."
+            "Шаблон имени выходного файла при конвертации. Доступные ключи: `{PITCH_SHIFT}`, `{NAME}`, `{MODEL}`, `{SPEAKER}`."
         )
         template_input = gr.Textbox(
             label="Шаблон имени файла",
             value=current_template,
-            info="Пример: {NAME}_({MODEL}_{SPEAKER})",
+            info="Пример: {PITCH_SHIFT} {NAME} ({MODEL}_{SPEAKER})",
         )
-        save_template_btn = gr.Button("Сохранить настройки именования", variant="primary")
+        save_template_btn = gr.Button(
+            "Сохранить настройки именования", variant="primary"
+        )
         status_text = gr.Textbox(label="Статус", interactive=False)
 
     save_template_btn.click(
@@ -388,10 +400,15 @@ def _conversion_settings_tab():
         outputs=[status_text],
     )
 
+
 def conversion_tab():
+    from gradio_ui.models import models_tab
+    
     with gr.Tab("Одиночная конвертация"):
         _single_conversion_tab()
     with gr.Tab("Пакетная конвертация"):
         _batch_conversion_tab()
+    with gr.Tab("Модели"):
+        models_tab("--offline" in sys.argv)
     with gr.Tab("Настройки"):
         _conversion_settings_tab()

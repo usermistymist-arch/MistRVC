@@ -267,18 +267,16 @@ def generate_filelist(model_path: str, sample_rate: int, include_mutes: int = 2)
         # Fallback на случай, если папок нет (старая структура)
         speaker_dirs = [""]
 
-    for speaker_id_str in speaker_dirs:
+    for speaker_id, speaker_dir in enumerate(speaker_dirs):
         speaker_gt_dir = (
-            os.path.join(gt_wavs_dir, speaker_id_str) if speaker_id_str else gt_wavs_dir
+            os.path.join(gt_wavs_dir, speaker_dir) if speaker_dir else gt_wavs_dir
         )
         speaker_feature_dir = (
-            os.path.join(feature_dir, speaker_id_str) if speaker_id_str else feature_dir
+            os.path.join(feature_dir, speaker_dir) if speaker_dir else feature_dir
         )
-        speaker_f0_dir = (
-            os.path.join(f0_dir, speaker_id_str) if speaker_id_str else f0_dir
-        )
+        speaker_f0_dir = os.path.join(f0_dir, speaker_dir) if speaker_dir else f0_dir
         speaker_f0nsf_dir = (
-            os.path.join(f0nsf_dir, speaker_id_str) if speaker_id_str else f0nsf_dir
+            os.path.join(f0nsf_dir, speaker_dir) if speaker_dir else f0nsf_dir
         )
 
         if not os.path.isdir(speaker_gt_dir):
@@ -298,8 +296,6 @@ def generate_filelist(model_path: str, sample_rate: int, include_mutes: int = 2)
                 and os.path.exists(os.path.join(speaker_f0nsf_dir, f"{name}.wav.npy"))
             ):
                 valid_names.append(name)
-
-        speaker_id = int(speaker_id_str) if speaker_id_str else 0
 
         for name in valid_names:
             options.append(
@@ -338,7 +334,7 @@ def generate_filelist(model_path: str, sample_rate: int, include_mutes: int = 2)
                 f.write(f"speaker_{idx} = {speaker_dir}\n")
     else:
         with open(speakers_path, "w", encoding="utf-8") as f:
-            f.write("speaker_0 = Speaker 0\n")
+            f.write("speaker_0 = default_speaker\n")
 
 
 if __name__ == "__main__":

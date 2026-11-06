@@ -10,7 +10,7 @@ SETTINGS_FILE = os.path.join(SETTINGS_DIR, "settings.json")
 # Дефолтные настройки
 DEFAULT_SETTINGS = {
     "theme_color": "teal",
-    "infer_name_template": "{NAME}_({MODEL}_{SPEAKER})",
+    "infer_name_template": "{PITCH_SHIFT} {NAME} ({MODEL}_{SPEAKER})",
 }
 
 # Список поддерживаемых цветов Gradio (отображаемое имя, внутреннее значение)
@@ -38,7 +38,9 @@ def load_settings():
                 settings = json.load(f)
                 # Добавляем дефолтное значение шаблона, если его нет в старом файле
                 if "infer_name_template" not in settings:
-                    settings["infer_name_template"] = DEFAULT_SETTINGS["infer_name_template"]
+                    settings["infer_name_template"] = DEFAULT_SETTINGS[
+                        "infer_name_template"
+                    ]
                 return settings
         except Exception:
             pass
@@ -53,6 +55,7 @@ def save_theme_color(color):
     with open(SETTINGS_FILE, "w", encoding="utf-8") as f:
         json.dump(settings, f, ensure_ascii=False, indent=2)
 
+
 def update_filename_template(template: str):
     """Обновляет только шаблон именования, сохраняя остальные настройки."""
     settings = load_settings()
@@ -62,10 +65,12 @@ def update_filename_template(template: str):
         json.dump(settings, f, ensure_ascii=False, indent=2)
     return f"✅ Шаблон сохранён: '{template}'"
 
+
 def apply_theme(color):
     """Сохраняет цвет и возвращает сообщение о статусе."""
     save_theme_color(color)
     return f"✅ Цвет темы сохранён: '{color}'. Перезапустите интерфейс для применения."
+
 
 def settings_tab():
     """Создаёт содержимое вкладки 'Настройки' (только глобальные)."""

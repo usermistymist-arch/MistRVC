@@ -9,7 +9,6 @@ class Config:
     def __init__(self):
         # Определение устройства
         self.device = self._get_device()
-        print("Используемое устройство: ", self.device)
 
         # Конфигурация параметров GPU
         self.gpu_name, self.gpu_mem = (

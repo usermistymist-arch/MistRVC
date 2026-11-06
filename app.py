@@ -37,7 +37,6 @@ from gradio_ui.common import (
     refresh_models,
 )
 from gradio_ui.inference import conversion_tab
-from gradio_ui.models import models_tab
 from gradio_ui.tools import tools_tab
 from gradio_ui.training import training_tab
 
@@ -125,9 +124,6 @@ with gr.Blocks(
             gr.Code(
                 value=uvr_error, language="python", interactive=False, show_label=False
             )
-
-    with gr.Tab("Модели"):
-        models_tab(is_offline_mode())
 
     with gr.Tab("Инструменты"):
         tools_tab()
