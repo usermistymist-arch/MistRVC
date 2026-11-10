@@ -66,7 +66,7 @@ def _inspect_model(model_file) -> str:
         lines.append(f"Слоёв: {len(weights)}")
     if checkpoint.get("version") != "v2" or not checkpoint.get("f0", 1):
         lines.append("")
-        lines.append("⚠️ MuXVS поддерживает только v2-модели с питчем.")
+        lines.append("MuXVS поддерживает только v2-модели с питчем.")
     return "\n".join(lines)
 
 
@@ -111,6 +111,100 @@ def _upscale_audio(
     if not os.path.isfile(output_path):
         raise gr.Error(f"Результат не найден: {output_path}")
     return gr.Audio(output_path, label=os.path.basename(output_path))
+
+
+def _convert_tb_to_txt(tb_files) -> list[str]:
+    """Читает файлы событий TensorBoard и возвращает список путей к .txt файлам."""
+    if not tb_files:
+        raise gr.Error("Прикрепите хотя бы один файл событий TensorBoard (.0, .1 или events.out.tfevents).")
+    
+    try:
+        from tensorboard.backend.event_processing.event_accumulator import EventAccumulator
+    except ImportError as error:
+        raise gr.Error("Библиотека tensorboard не установлена.") from error
+
+    import tempfile
+    import shutil
+
+    temp_dir = os.path.join(PROJECT_ROOT, "output", "tb_converted")
+    os.makedirs(temp_dir, exist_ok=True)
+    
+    output_paths = []
+    skipped_files = []
+    
+    if not isinstance(tb_files, list):
+        tb_files = [tb_files]
+        
+    for tb_file in tb_files:
+        path = _uploaded_path(tb_file)
+        if not path or not os.path.isfile(path):
+            skipped_files.append(f"{os.path.basename(str(tb_file))} (файл не найден)")
+            continue
+            
+        temp_tb_dir = tempfile.mkdtemp()
+        temp_file_path = os.path.join(temp_tb_dir, "events.out.tfevents.0")
+        try:
+            shutil.copy2(path, temp_file_path)
+            event_acc = EventAccumulator(temp_file_path)
+            event_acc.Reload()
+        except Exception as error:
+            skipped_files.append(f"{os.path.basename(path)} (ошибка чтения: {error})")
+            shutil.rmtree(temp_tb_dir, ignore_errors=True)
+            continue
+        finally:
+            shutil.rmtree(temp_tb_dir, ignore_errors=True)
+        
+        tags = event_acc.Tags()
+        scalar_tags = tags.get('scalars', [])
+        
+        if not scalar_tags:
+            all_tags_info = {k: (len(v) if isinstance(v, list) else v) for k, v in tags.items()}
+            skipped_files.append(
+                f"{os.path.basename(path)} (нет скаляров, найдено: {all_tags_info})"
+            )
+            continue
+            
+        lines = []
+        lines.append(f"Файл: {os.path.basename(path)}")
+        lines.append("=" * 60)
+        
+        for tag in sorted(scalar_tags):
+            events = event_acc.Scalars(tag)
+            if not events:
+                continue
+            
+            lines.append(f"\n{tag}:")
+            for e in events:
+                lines.append(f"     [Шаг {e.step}] - {e.value:.6f}")
+                
+        txt_content = "\n".join(lines)
+        
+        base_name = os.path.splitext(os.path.basename(path))[0]
+        if "events.out.tfevents" in base_name:
+            clean_name = base_name.replace("events.out.tfevents", "metrics").replace(".", "_")
+        else:
+            clean_name = base_name
+            
+        txt_filename = f"{clean_name}_converted.txt"
+        txt_path = os.path.join(temp_dir, txt_filename)
+        
+        with open(txt_path, "w", encoding="utf-8") as f:
+            f.write(txt_content)
+            
+        output_paths.append(txt_path)
+        
+    if skipped_files:
+        warning_text = "Пропущены файлы:\n" + "\n".join(f"• {name}" for name in skipped_files)
+        gr.Warning(warning_text)
+        
+    if not output_paths:
+        raise gr.Error(
+            "Не удалось обработать ни один файл. "
+            "Проверьте формат и содержимое. "
+            "Смотрите предупреждение выше для подробностей."
+        )
+        
+    return output_paths
 
 
 def tools_tab():
@@ -197,4 +291,28 @@ def tools_tab():
             upscale_btn = gr.Button("Улучшить", variant="primary")
         upscale_btn.click(
             _upscale_audio, inputs=[upscale_in, overlap], outputs=upscale_out
+        )
+    
+    with gr.Accordion("Конвертация TensorBoard eval файлов .0 в .txt", open=False):
+        gr.Markdown(
+            "Загрузите один или несколько файлов событий TensorBoard (например, `events.out.tfevents...0`), "
+            "чтобы преобразовать их метрики (loss, lr и др.) в удобный читаемый текстовый формат."
+        )
+        with gr.Row():
+            tb_files = gr.File(
+                label="Файлы TensorBoard", 
+                file_types=[".0", ".1", ".tfevents"], 
+                file_count="multiple"
+            )
+            tb_file_output = gr.File(
+                label="Скачать результаты (.txt)", 
+                file_count="multiple",
+                interactive=False
+            )
+        convert_tb_btn = gr.Button("Конвертировать", variant="primary")
+            
+        convert_tb_btn.click(
+            _convert_tb_to_txt,
+            inputs=[tb_files],
+            outputs=[tb_file_output]
         )
