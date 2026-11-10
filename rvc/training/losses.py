@@ -16,18 +16,18 @@ def feature_loss(fmap_r, fmap_g):
     )
 
 
-def discriminator_loss(disc_real_outputs, disc_generated_outputs):
-    """Compute the discriminator loss for real and generated outputs.
+def discriminator_loss(disc_real_outputs, disc_generated_outputs, label_smoothing=0.0):
+    """Compute the discriminator loss for real and generated outputs with optional label smoothing.
 
     Args:
         disc_real_outputs (list of torch.Tensor): List of discriminator outputs for real samples.
         disc_generated_outputs (list of torch.Tensor): List of discriminator outputs for generated samples.
-
+        label_smoothing (float): Amount of smoothing to apply to labels (e.g., 0.1 makes real=0.9, fake=0.1).
     """
     loss = 0
     for dr, dg in zip(disc_real_outputs, disc_generated_outputs):
-        r_loss = torch.mean((1 - dr.float()) ** 2)
-        g_loss = torch.mean(dg.float() ** 2)
+        r_loss = torch.mean((1.0 - label_smoothing - dr.float()) ** 2)
+        g_loss = torch.mean((0.0 + label_smoothing - dg.float()) ** 2)
         loss += r_loss + g_loss
     return loss
 

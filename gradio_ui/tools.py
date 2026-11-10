@@ -113,7 +113,7 @@ def _upscale_audio(
     return gr.Audio(output_path, label=os.path.basename(output_path))
 
 
-def _convert_tb_to_txt(tb_files) -> list[str]:
+def _convert_tb_to_txt(tb_files, epochs_mode=True) -> list[str]:
     """Читает файлы событий TensorBoard и возвращает список путей к .txt файлам."""
     if not tb_files:
         raise gr.Error("Прикрепите хотя бы один файл событий TensorBoard (.0, .1 или events.out.tfevents).")
@@ -167,15 +167,19 @@ def _convert_tb_to_txt(tb_files) -> list[str]:
         lines = []
         lines.append(f"Файл: {os.path.basename(path)}")
         lines.append("=" * 60)
+        unit = "Эпоха" if epochs_mode else "Шаг"
         
         for tag in sorted(scalar_tags):
             events = event_acc.Scalars(tag)
             if not events:
                 continue
             
+            precision = 10 if "learning rate" in tag.lower() else 6
+            fmt = f".{precision}f"
+            
             lines.append(f"\n{tag}:")
             for e in events:
-                lines.append(f"     [Шаг {e.step}] - {e.value:.6f}")
+                lines.append(f"     [{unit} {e.step}] - {e.value:{fmt}}")
                 
         txt_content = "\n".join(lines)
         
@@ -309,10 +313,15 @@ def tools_tab():
                 file_count="multiple",
                 interactive=False
             )
+        epochs_mode = gr.Checkbox(
+            label="Эпохи вместо шагов",
+            value=True,
+            info="В MistRVC метрики пишутся раз в эпоху. Снимите галочку для сторонних event-файлов, где значения логируются по шагам.",
+        )
         convert_tb_btn = gr.Button("Конвертировать", variant="primary")
-            
+
         convert_tb_btn.click(
             _convert_tb_to_txt,
-            inputs=[tb_files],
+            inputs=[tb_files, epochs_mode],
             outputs=[tb_file_output]
         )

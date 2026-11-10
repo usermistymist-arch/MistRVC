@@ -114,6 +114,15 @@ def get_hparams():
     parser.add_argument(
         "--save_half", type=_strtobool, choices=[True, False], default=True
     )
+    parser.add_argument(
+        "--d_lr_multiplier", type=float, default=1.0
+    )
+    parser.add_argument(
+        "--d_grad_clip", type=float, default=0.0
+    )
+    parser.add_argument(
+        "--label_smoothing", type=float, default=0.0
+    )
     args = parser.parse_args()
 
     experiment_dir = os.path.join(args.experiment_dir, args.model_name)
@@ -141,6 +150,9 @@ def get_hparams():
     hparams.gpus = args.gpus
     hparams.save_to_zip = args.save_to_zip
     hparams.save_half = args.save_half
+    hparams.d_lr_multiplier = args.d_lr_multiplier
+    hparams.d_grad_clip = args.d_grad_clip
+    hparams.label_smoothing = args.label_smoothing
     hparams.data.training_files = f"{experiment_dir}/data/filelist.txt"
 
     print(" \n\nПАРАМЕТРЫ ОБУЧЕНИЯ ")
@@ -300,7 +312,7 @@ def run(hps, rank, n_gpus, device, device_id):
             )
             optim_d = AdaBelief(
                 net_d.parameters(),
-                lr=hps.train.learning_rate,
+                lr=hps.train.learning_rate * hps.d_lr_multiplier,
                 betas=hps.train.betas,
                 eps=1e-8,
             )
@@ -317,7 +329,7 @@ def run(hps, rank, n_gpus, device, device_id):
             )
             optim_d = PolOpt(
                 net_d.parameters(),
-                lr=hps.train.learning_rate * 1.5,
+                lr=hps.train.learning_rate * 1.5 * hps.d_lr_multiplier,
                 betas=(0.5, 0.99),
                 eps=1e-7,
                 weight_decay=0.01,
@@ -332,7 +344,7 @@ def run(hps, rank, n_gpus, device, device_id):
             )
             optim_d = torch.optim.AdamW(
                 net_d.parameters(),
-                hps.train.learning_rate,
+                hps.train.learning_rate * hps.d_lr_multiplier,
                 betas=hps.train.betas,
                 eps=hps.train.eps,
             )
@@ -516,13 +528,17 @@ def train_and_evaluate(
         )
 
         # Discriminator loss
-        for _ in range(1):
-            y_d_hat_r, y_d_hat_g, _, _ = net_d(wave, y_hat.detach())
-            loss_disc = discriminator_loss(y_d_hat_r, y_d_hat_g)
-            optim_d.zero_grad()
-            loss_disc.backward()
-            grad_norm_d = grad_norm(net_d.parameters())
-            optim_d.step()
+        y_d_hat_r, y_d_hat_g, _, _ = net_d(wave, y_hat.detach())
+        loss_disc = discriminator_loss(y_d_hat_r, y_d_hat_g, label_smoothing=hps.label_smoothing)
+        optim_d.zero_grad()
+        loss_disc.backward()
+        
+        # Gradient clipping
+        if hps.d_grad_clip > 0:
+            torch.nn.utils.clip_grad_norm_(net_d.parameters(), max_norm=hps.d_grad_clip)
+            
+        grad_norm_d = grad_norm(net_d.parameters())
+        optim_d.step()
 
         # Generator loss
         for _ in range(1):

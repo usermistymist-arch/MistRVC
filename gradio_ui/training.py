@@ -308,6 +308,9 @@ def _train_model(
     pretrain_d,
     save_to_zip,
     save_half,
+    d_lr_multiplier,
+    d_grad_clip,
+    label_smoothing,
 ):
     model_name = _require_name(model_name)
     logs_dir = _require_logs_dir()
@@ -341,6 +344,12 @@ def _train_model(
         "true" if save_to_zip else "false",
         "--save_half",
         "true" if save_half else "false",
+        "--d_lr_multiplier",
+        float(d_lr_multiplier),
+        "--d_grad_clip",
+        float(d_grad_clip),
+        "--label_smoothing",
+        float(label_smoothing),
     )
 
     notes, (resolved_g, resolved_d) = yield from _drain(
@@ -406,30 +415,51 @@ def training_tab():
                 minimum=1, maximum=128, step=1, value=14, label="Батч"
             )
         with gr.Accordion("Дополнительно", open=True):
-            with gr.Row(equal_height=True):
-                vocoder = gr.Dropdown(VOCODERS, value=DEFAULT_VOCODER, label="Вокодер")
-                optimizer = gr.Dropdown(OPTIMIZERS, value="AdamW", label="Оптимизатор")
-                gpus = gr.Textbox("0", label="GPU")
-            with gr.Row(equal_height=True):
-                pretrain = gr.Dropdown(
-                    pretrain_choices(DEFAULT_VOCODER, 48000),
-                    value=default_pretrain(DEFAULT_VOCODER, 48000),
-                    label="Претрейн",
-                    scale=1,
-                )
-                pretrain_g = gr.Textbox(
-                    label="Свой претрейн G",
-                    placeholder="Путь или URL к .pth — вместо встроенного",
-                    scale=2,
-                )
-                pretrain_d = gr.Textbox(
-                    label="Свой претрейн D",
-                    placeholder="Путь или URL к .pth — вместо встроенного",
-                    scale=2,
-                )
-            with gr.Row(equal_height=True):
-                save_to_zip = gr.Checkbox(False, label="Собрать ZIP в конце")
-                save_half = gr.Checkbox(False, label="Половинная точность")
+            with gr.Group():
+                with gr.Row(equal_height=True):
+                    vocoder = gr.Dropdown(VOCODERS, value=DEFAULT_VOCODER, label="Вокодер")
+                    optimizer = gr.Dropdown(OPTIMIZERS, value="AdamW", label="Оптимизатор")
+                    gpus = gr.Textbox("0", label="GPU")
+                with gr.Row(equal_height=True):
+                    pretrain = gr.Dropdown(
+                        pretrain_choices(DEFAULT_VOCODER, 48000),
+                        value=default_pretrain(DEFAULT_VOCODER, 48000),
+                        label="Претрейн",
+                        scale=1,
+                    )
+                    pretrain_g = gr.Textbox(
+                        label="Свой претрейн G",
+                        placeholder="Путь или URL к .pth — вместо встроенного",
+                        scale=2,
+                    )
+                    pretrain_d = gr.Textbox(
+                        label="Свой претрейн D",
+                        placeholder="Путь или URL к .pth — вместо встроенного",
+                        scale=2,
+                    )
+                with gr.Row(equal_height=True):
+                    save_to_zip = gr.Checkbox(False, label="Собрать ZIP в конце")
+                    save_half = gr.Checkbox(False, label="Половинная точность")
+                with gr.Accordion("Стабилизация обучения", open=False):
+                    gr.Markdown(
+                        "Настройки для опытных пользователей - изменяйте, только если знаете что делаете."
+                    )
+                    with gr.Row():
+                        d_lr_multiplier = gr.Slider(
+                            minimum=0.1, maximum=1.0, step=0.05, value=1.0,
+                            label="d_lr_multiplier",
+                            info="1.0 = как у генератора, 0.25 = в 4 раза медленнее."
+                        )
+                        d_grad_clip = gr.Slider(
+                            minimum=0.0, maximum=100.0, step=5.0, value=0.0,
+                            label="d_grad_clip",
+                            info="0.0 = выкл."
+                        )
+                        label_smoothing = gr.Slider(
+                            minimum=0.0, maximum=0.2, step=0.01, value=0.0,
+                            label="d_label_smoothing",
+                            info="0.0 = выкл."
+                        )
         with gr.Row(equal_height=True):
             train_btn = gr.Button("Запустить обучение", variant="primary")
             stop_btn = gr.Button("Завершить процесс", variant="stop")
@@ -483,6 +513,9 @@ def training_tab():
             pretrain_d,
             save_to_zip,
             save_half,
+            d_lr_multiplier,
+            d_grad_clip,
+            label_smoothing,
         ],
         outputs=log,
     )
