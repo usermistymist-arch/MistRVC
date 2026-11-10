@@ -56,6 +56,24 @@ def create_parser():
     base.add_argument(
         "--output_format", type=str, default="mp3", help="Формат выходного файла"
     )
+    base.add_argument(
+        "--speaker_id",
+        type=int,
+        default=0,
+        help="ID спикера для мульти-спикерных моделей (default: 0)",
+    )
+    base.add_argument(
+        "--speaker_name",
+        type=str,
+        default="",
+        help="Имя спикера для подстановки в шаблон файла",
+    )
+    base.add_argument(
+        "--filename_template",
+        type=str,
+        default="{NAME}_({MODEL}_{SPEAKER})",
+        help="Шаблон имени выходного файла. Ключи: {NAME}, {MODEL}, {SPEAKER}, {PITCH_SHIFT}",
+    )
 
     # Главный парсер с субкомандами
     parser = argparse.ArgumentParser(
@@ -84,6 +102,9 @@ def main():
         "index_rate": args.index_rate,
         "volume_envelope": args.volume_envelope,
         "output_format": args.output_format,
+        "speaker_id": args.speaker_id,
+        "speaker_name": args.speaker_name,
+        "filename_template": args.filename_template,
     }
 
     if args.command == "rvc":
