@@ -5,6 +5,8 @@ import warnings
 
 # Настройка окружения
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
+os.environ["GLOG_minloglevel"] = "3"
+os.environ["TORCH_CPP_LOG_LEVEL"] = "ERROR"
 os.environ["USE_LIBUV"] = "0" if sys.platform == "win32" else "1"
 
 # Настройка логирования и подавление предупреждений
@@ -389,14 +391,14 @@ def run(hps, rank, n_gpus, device, device_id):
                 # получают одинаковое условие и звучат одним голосом. Разводим
                 # строки своих спикеров случайной инициализацией того же масштаба.
                 if rank == 0:
-                    print("[ФИКС] Переинициализация emb_g...", flush=True)
-                n_spk = hps.model.spk_embed_dim  # fallback: 109 из конфига
+                    print("Переинициализация emb_g...", flush=True)
                 speakers_path = os.path.join(hps.model_dir, "speakers.txt")
                 if os.path.exists(speakers_path):
                     with open(speakers_path, encoding="utf-8") as file:
                         lines = [line for line in file if line.strip()]
-                    if lines:
-                        n_spk = len(lines)
+                    n_spk = len(lines) if lines else 1
+                else:
+                    n_spk = 1
                 n_spk = min(
                     n_spk, g_model.emb_g.weight.shape[0]
                 )  # защита от >109 спикеров
@@ -411,7 +413,7 @@ def run(hps, rank, n_gpus, device, device_id):
 
                 if rank == 0:
                     print(
-                        f"[ФИКС] emb_g переинициализирован для {n_spk} спикеров (масштаб: {scale:.4f}).\n",
+                        f"emb_g переинициализирован для {n_spk} спикеров (масштаб: {scale:.4f}).\n",
                         flush=True,
                     )
 
@@ -532,11 +534,11 @@ def train_and_evaluate(
         loss_disc = discriminator_loss(y_d_hat_r, y_d_hat_g, label_smoothing=hps.label_smoothing)
         optim_d.zero_grad()
         loss_disc.backward()
-        
+
         # Gradient clipping
         if hps.d_grad_clip > 0:
             torch.nn.utils.clip_grad_norm_(net_d.parameters(), max_norm=hps.d_grad_clip)
-            
+
         grad_norm_d = grad_norm(net_d.parameters())
         optim_d.step()
 

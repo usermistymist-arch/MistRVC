@@ -5,12 +5,15 @@ import traceback
 import warnings
 from typing import Any
 
+os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
+os.environ["GLOG_minloglevel"] = "3"
+os.environ["TORCH_CPP_LOG_LEVEL"] = "ERROR"
+
 import torch
 
 from gradio_ui.settings import DEFAULT_SETTINGS, load_settings
 
 # Configuring the environment and logging
-os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"  # Disable unnecessary TensorFlow logs
 os.environ["TF_ENABLE_ONEDNN_OPTS"] = (
     "0"  # TensorFlow сам не используется, но подтягивается TensorBoard'ом
 )

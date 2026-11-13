@@ -8,6 +8,7 @@ from random import shuffle
 # Установка переменных окружения и отключение предупреждений
 os.environ["CUDA_VISIBLE_DEVICES"] = "0"
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
+os.environ["GLOG_minloglevel"] = "3"
 logging.basicConfig(level=logging.WARNING)
 warnings.filterwarnings("ignore")
 
@@ -326,15 +327,14 @@ def generate_filelist(model_path: str, sample_rate: int, include_mutes: int = 2)
     ) as f:
         f.write("\n".join(options))
 
-    # Сохраняем имена спикеров для инференса
     speakers_path = os.path.join(model_path, "speakers.txt")
-    if speaker_dirs:
+    real_speakers = [d for d in speaker_dirs if d]
+    if len(real_speakers) > 1:
         with open(speakers_path, "w", encoding="utf-8") as f:
-            for idx, speaker_dir in enumerate(speaker_dirs):
+            for idx, speaker_dir in enumerate(real_speakers):
                 f.write(f"speaker_{idx} = {speaker_dir}\n")
-    else:
-        with open(speakers_path, "w", encoding="utf-8") as f:
-            f.write("speaker_0 = default_speaker\n")
+    elif os.path.exists(speakers_path):
+        os.remove(speakers_path)
 
 
 if __name__ == "__main__":

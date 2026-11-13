@@ -9,6 +9,7 @@ import json
 import os
 import re
 import shutil
+import tempfile
 from urllib.parse import urlsplit
 
 import gradio as gr
@@ -119,8 +120,7 @@ def _input_root(model_name: str, files, folder: str) -> str:
             raise gr.Error(f"Папка не найдена: {folder.strip()}")
         return folder.strip()
     if files:
-        dataset_dir = os.path.join(_exp_dir(model_name), "dataset")
-        os.makedirs(dataset_dir, exist_ok=True)
+        dataset_dir = tempfile.mkdtemp(prefix="mistrvc_dataset_")
         copied = 0
         for item in files:
             path = getattr(item, "name", None) or (
@@ -451,7 +451,7 @@ def training_tab():
                             info="1.0 = как у генератора, 0.25 = в 4 раза медленнее."
                         )
                         d_grad_clip = gr.Slider(
-                            minimum=0.0, maximum=100.0, step=5.0, value=0.0,
+                            minimum=0.0, maximum=300.0, step=5.0, value=0.0,
                             label="d_grad_clip",
                             info="0.0 = выкл."
                         )

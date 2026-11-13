@@ -54,6 +54,7 @@ ignore = [
     "B023",   # function definition in loop (намеренно в fairseq)
     "E722",   # bare except (перехватывает любую ошибку с подробным сообщением)
     "B020",   # loop variable overrides iterable (намеренно в preprocess)
+	"SIM112", # env variable casing (GLOG_minloglevel — правильное написание для glog)
 ]
 
 [format]

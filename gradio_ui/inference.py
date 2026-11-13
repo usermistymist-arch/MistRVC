@@ -403,7 +403,7 @@ def _conversion_settings_tab():
 
 def conversion_tab():
     from gradio_ui.models import models_tab
-    
+
     with gr.Tab("Одиночная конвертация"):
         _single_conversion_tab()
     with gr.Tab("Пакетная конвертация"):

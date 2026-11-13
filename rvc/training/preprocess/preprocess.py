@@ -111,14 +111,16 @@ class PreProcess:
                 if peak > 1.0:
                     tmp_audio = tmp_audio * (1.0 / peak)
 
-        # Создаем папку для спикера с ОРИГИНАЛЬНЫМ именем
-        speaker_gt_dir = os.path.join(self.gt_wavs_dir, speaker_name)
-        speaker_16k_dir = os.path.join(self.wavs16k_dir, speaker_name)
+        if speaker_name:
+            speaker_gt_dir = os.path.join(self.gt_wavs_dir, speaker_name)
+            speaker_16k_dir = os.path.join(self.wavs16k_dir, speaker_name)
+            filename = f"{speaker_name}_{idx0}_{idx1}.wav"
+        else:
+            speaker_gt_dir = self.gt_wavs_dir
+            speaker_16k_dir = self.wavs16k_dir
+            filename = f"{idx0}_{idx1}.wav"
         os.makedirs(speaker_gt_dir, exist_ok=True)
         os.makedirs(speaker_16k_dir, exist_ok=True)
-
-        # Имя файла начинается с оригинального имени спикера
-        filename = f"{speaker_name}_{idx0}_{idx1}.wav"
 
         wavfile.write(
             os.path.join(speaker_gt_dir, filename),
@@ -175,9 +177,7 @@ class PreProcess:
                     )
                     self._process_directory(dir_path, subdir, names)
             else:
-                print(
-                    "Датасет не разделён на спикеров, используется имя 'default_speaker'"
-                )
+                print("Датасет не разделён на спикеров (один спикер).")
                 names = sorted(
                     name
                     for name in os.listdir(input_root)
@@ -187,7 +187,7 @@ class PreProcess:
                     raise FileNotFoundError(
                         f"В папке '{input_root}' не найдено ни одного аудиофайла (поддерживаются: {', '.join(sorted(AUDIO_EXTENSIONS))}).",
                     )
-                self._process_directory(input_root, "default_speaker", names)
+                self._process_directory(input_root, "", names)
 
             print("✓ Сегментация успешно завершена!")
         except Exception:
@@ -197,7 +197,7 @@ class PreProcess:
         total_segments = 0
         with tqdm(
             total=len(names),
-            desc=f"Сегментация (спикер {speaker_name})",
+            desc=f"Сегментация (спикер {speaker_name})" if speaker_name else "Сегментация",
             bar_format="{desc}: {n}/{total}{postfix}",
             ncols=80,
         ) as pbar:
