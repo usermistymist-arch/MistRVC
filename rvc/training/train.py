@@ -479,6 +479,15 @@ def run(hps, rank, n_gpus, device, device_id):
             dist.destroy_process_group()
 
 
+# Имена субдискриминаторов (порядок из discriminators.py)
+_DISC_NAMES = {
+    "HiFi-GAN": ["S", "P2", "P3", "P5", "P7", "P11", "P17", "P23", "P37"],
+    "MRF HiFi-GAN": ["S", "P2", "P3", "P5", "P7", "P11", "P17", "P23", "P37"],
+    "RefineGAN": ["S", "P2", "P3", "P5", "P7", "P11", "R1024", "R2048", "R512"],
+}
+_MEL_SCALE_NAMES = ["5", "10", "20", "40", "80", "160", "320", "480"]
+
+
 def train_and_evaluate(
     hps,
     rank,
@@ -503,6 +512,7 @@ def train_and_evaluate(
 
     acc = MetricsAccumulator()
     last_batch = None
+    disc_names = _DISC_NAMES[hps.model.vocoder]
 
     progress = tqdm(
         train_loader,
@@ -531,7 +541,11 @@ def train_and_evaluate(
 
         # Discriminator loss
         y_d_hat_r, y_d_hat_g, _, _ = net_d(wave, y_hat.detach())
-        loss_disc = discriminator_loss(y_d_hat_r, y_d_hat_g, label_smoothing=hps.label_smoothing)
+        loss_disc, r_losses, g_losses = discriminator_loss(
+            y_d_hat_r, y_d_hat_g, label_smoothing=hps.label_smoothing
+        )
+        loss_disc_r = sum(r_losses)
+        loss_disc_g = sum(g_losses)
         optim_d.zero_grad()
         loss_disc.backward()
 
@@ -542,32 +556,56 @@ def train_and_evaluate(
         grad_norm_d = grad_norm(net_d.parameters())
         optim_d.step()
 
+        # D diagnostics: уверенность D на реальных и фейковых сэмплах
+        d_score_r = torch.stack([dr.float().mean() for dr in y_d_hat_r]).mean()
+        d_score_g = torch.stack([dg.float().mean() for dg in y_d_hat_g]).mean()
+
         # Generator loss
         for _ in range(1):
             _, y_d_hat_g, fmap_r, fmap_g = net_d(wave, y_hat)
-            loss_mel = fn_mel_loss(wave, y_hat) * hps.train.c_mel / 3.0
+            loss_mel_raw, mel_per_scale = fn_mel_loss(wave, y_hat)
+            loss_mel = loss_mel_raw * hps.train.c_mel / 3.0
+            mel_per_scale_scaled = [l * hps.train.c_mel / 3.0 for l in mel_per_scale]
             loss_kl = kl_loss(z_p, logs_q, m_p, logs_p, z_mask) * hps.train.c_kl
-            loss_fm = feature_loss(fmap_r, fmap_g)
+            loss_fm, fm_per_disc = feature_loss(fmap_r, fmap_g)
             loss_gen = generator_loss(y_d_hat_g)
             loss_gen_all = loss_gen + loss_fm + loss_mel + loss_kl
             optim_g.zero_grad()
             loss_gen_all.backward()
             grad_norm_g = grad_norm(net_g.parameters())
+            # Per-component gradient norms
+            g_model = net_g.module if hasattr(net_g, "module") else net_g
+            grad_norm_enc_p = grad_norm(g_model.enc_p.parameters())
+            grad_norm_dec = grad_norm(g_model.dec.parameters())
+            grad_norm_enc_q = grad_norm(g_model.enc_q.parameters())
+            grad_norm_flow = grad_norm(g_model.flow.parameters())
             optim_g.step()
 
         # Аккумуляция метрик
-        acc.update(
-            **{
-                "loss/avg/d": loss_disc,
-                "loss/avg/g": loss_gen,
-                "loss/g/fm": loss_fm,
-                "loss/g/mel": loss_mel,
-                "loss/g/kl": loss_kl,
-                "loss/g/total": loss_gen_all,
-                "grad/norm_d": grad_norm_d,
-                "grad/norm_g": grad_norm_g,
-            },
-        )
+        acc_update_dict = {
+            "loss/avg/d": loss_disc,
+            "loss/disc_r": loss_disc_r,
+            "loss/disc_g": loss_disc_g,
+            "loss/avg/g": loss_gen,
+            "loss/g/fm": loss_fm,
+            "loss/g/mel": loss_mel,
+            "loss/g/kl": loss_kl,
+            "loss/g/total": loss_gen_all,
+            "grad/norm_d": grad_norm_d,
+            "grad/norm_g": grad_norm_g,
+            "grad/norm_enc_p": grad_norm_enc_p,
+            "grad/norm_dec": grad_norm_dec,
+            "grad/norm_enc_q": grad_norm_enc_q,
+            "grad/norm_flow": grad_norm_flow,
+            "eval/d_score_r": d_score_r,
+            "eval/d_score_g": d_score_g,
+        }
+        for name, fml in zip(disc_names, fm_per_disc):
+            acc_update_dict[f"loss/g/fm_{name}"] = fml
+        for i, ms in enumerate(mel_per_scale_scaled):
+            acc_update_dict[f"loss/g/mel_scale_n{_MEL_SCALE_NAMES[i]}"] = ms
+        acc.update(**acc_update_dict)
+
         if rank == 0:
             progress.set_postfix(
                 **{
@@ -621,8 +659,8 @@ def train_and_evaluate(
             **avg,
             "eval/mel_sim": mel_similarity,
             "eval/f0_error_cents": f0_error,
-            "Learning Rate/G": optim_g.param_groups[0]["lr"],
-            "Learning Rate/D": optim_d.param_groups[0]["lr"],
+            "learning rate/G": optim_g.param_groups[0]["lr"],
+            "learning rate/D": optim_d.param_groups[0]["lr"],
         }
         image_dict = {
             "mel/slice/real": plot_spectrogram_to_numpy(y_mel[0].data.cpu().numpy()),

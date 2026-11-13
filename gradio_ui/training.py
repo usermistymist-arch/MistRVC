@@ -451,7 +451,7 @@ def training_tab():
                             info="1.0 = как у генератора, 0.25 = в 4 раза медленнее."
                         )
                         d_grad_clip = gr.Slider(
-                            minimum=0.0, maximum=300.0, step=5.0, value=0.0,
+                            minimum=0.0, maximum=500.0, step=5.0, value=0.0,
                             label="d_grad_clip",
                             info="0.0 = выкл."
                         )

@@ -172,10 +172,13 @@ class MultiScaleMelSpectrogramLoss(torch.nn.Module):
 
     def forward(self, real: torch.Tensor, fake: torch.Tensor):
         loss = 0.0
+        per_scale_losses = []
         for p in self.stft_params:
             real_mels = self.mel_spectrogram(real, *p)
             fake_mels = self.mel_spectrogram(fake, *p)
             real_logmels = torch.log(real_mels.clamp(min=1e-5)) / self.log_base
             fake_logmels = torch.log(fake_mels.clamp(min=1e-5)) / self.log_base
-            loss += self.loss_fn(real_logmels, fake_logmels)
-        return loss
+            scale_loss = self.loss_fn(real_logmels, fake_logmels)
+            loss += scale_loss
+            per_scale_losses.append(scale_loss)
+        return loss, per_scale_losses

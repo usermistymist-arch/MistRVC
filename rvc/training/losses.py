@@ -4,32 +4,34 @@ import torch
 def feature_loss(fmap_r, fmap_g):
     """Compute the feature loss between reference and generated feature maps.
 
-    Args:
-        fmap_r (list of torch.Tensor): List of reference feature maps.
-        fmap_g (list of torch.Tensor): List of generated feature maps.
-
+    Returns:
+        (total_loss, fm_per_disc): total + per-sub-discriminator list
     """
-    return 2 * sum(
-        torch.mean(torch.abs(rl - gl))
-        for dr, dg in zip(fmap_r, fmap_g)
-        for rl, gl in zip(dr, dg)
-    )
+    loss = 0
+    fm_per_disc = []
+    for dr, dg in zip(fmap_r, fmap_g):
+        disc_loss = 2 * sum(torch.mean(torch.abs(rl - gl)) for rl, gl in zip(dr, dg))
+        loss += disc_loss
+        fm_per_disc.append(disc_loss)
+    return loss, fm_per_disc
 
 
 def discriminator_loss(disc_real_outputs, disc_generated_outputs, label_smoothing=0.0):
     """Compute the discriminator loss for real and generated outputs with optional label smoothing.
 
-    Args:
-        disc_real_outputs (list of torch.Tensor): List of discriminator outputs for real samples.
-        disc_generated_outputs (list of torch.Tensor): List of discriminator outputs for generated samples.
-        label_smoothing (float): Amount of smoothing to apply to labels (e.g., 0.1 makes real=0.9, fake=0.1).
+    Returns:
+        (total_loss, r_losses, g_losses): total loss + per-sub-discriminator lists
     """
     loss = 0
+    r_losses = []
+    g_losses = []
     for dr, dg in zip(disc_real_outputs, disc_generated_outputs):
         r_loss = torch.mean((1.0 - label_smoothing - dr.float()) ** 2)
         g_loss = torch.mean((0.0 + label_smoothing - dg.float()) ** 2)
         loss += r_loss + g_loss
-    return loss
+        r_losses.append(r_loss)
+        g_losses.append(g_loss)
+    return loss, r_losses, g_losses
 
 
 def generator_loss(disc_outputs):
