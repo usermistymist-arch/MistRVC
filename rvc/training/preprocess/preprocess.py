@@ -197,7 +197,9 @@ class PreProcess:
         total_segments = 0
         with tqdm(
             total=len(names),
-            desc=f"Сегментация (спикер {speaker_name})" if speaker_name else "Сегментация",
+            desc=f"Сегментация (спикер {speaker_name})"
+            if speaker_name
+            else "Сегментация",
             bar_format="{desc}: {n}/{total}{postfix}",
             ncols=80,
         ) as pbar:

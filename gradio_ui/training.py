@@ -26,8 +26,8 @@ from gradio_ui.jobs import command, request_stop, run_job
 
 SAMPLE_RATES = [32000, 40000, 48000]
 DEFAULT_VOCODER = "HiFi-GAN"
-VOCODERS = ["HiFi-GAN", "MRF HiFi-GAN", "RefineGAN"]
-OPTIMIZERS = ["AdamW", "AdaBelief", "PolOpt"]
+DEFAULT_OPTIMIZER = "AdamW"
+DEFAULT_GPUS = "0"
 F0_METHODS = ["rmvpe", "hpa-rmvpe"]
 AUDIO_EXTENSIONS = (
     ".wav",
@@ -101,15 +101,11 @@ def _step_states(model_name):
     )
 
 
-def _refresh_pretrains(vocoder, sample_rate, current):
-    """Список претрейнов под выбранные вокодер и частоту; чужой выбор сбрасывается.
-
-    Наборы привязаны к вокодеру, поэтому при смене вокодера в списке остаются
-    только совместимые наборы, а для вокодеров без встроенных претрейнов —
-    один пункт «Без претрейна».
-    """
-    choices = pretrain_choices(vocoder, sample_rate)
-    value = current if current in choices else default_pretrain(vocoder, sample_rate)
+def _refresh_pretrains(sample_rate, current):
+    """Список претрейнов под выбранную частоту; чужой выбор сбрасывается."""
+    choices = pretrain_choices(DEFAULT_VOCODER, sample_rate)
+    default = default_pretrain(DEFAULT_VOCODER, sample_rate)
+    value = current if current in choices else default
     return gr.update(choices=choices, value=value)
 
 
@@ -300,17 +296,14 @@ def _train_model(
     total_epoch,
     save_every_epoch,
     batch_size,
-    vocoder,
-    optimizer,
-    gpus,
     pretrain,
     pretrain_g,
     pretrain_d,
     save_to_zip,
     save_half,
     d_lr_multiplier,
-    d_grad_clip,
-    label_smoothing,
+    d_grad_max_norm,
+    d_label_smoothing,
 ):
     model_name = _require_name(model_name)
     logs_dir = _require_logs_dir()
@@ -319,6 +312,7 @@ def _train_model(
         raise gr.Error(
             "Нет filelist.txt — сначала выполните нарезку и извлечение признаков."
         )
+    vocoder = DEFAULT_VOCODER
     _check_config(model_name, exp_dir, vocoder, int(sample_rate))
     cmd = command(
         "rvc.training.train",
@@ -335,21 +329,21 @@ def _train_model(
         "--sample_rate",
         int(sample_rate),
         "--vocoder",
-        vocoder,
+        DEFAULT_VOCODER,
         "--optimizer",
-        optimizer,
+        DEFAULT_OPTIMIZER,
         "--gpus",
-        (gpus or "0").strip(),
+        DEFAULT_GPUS,
         "--save_to_zip",
         "true" if save_to_zip else "false",
         "--save_half",
         "true" if save_half else "false",
         "--d_lr_multiplier",
         float(d_lr_multiplier),
-        "--d_grad_clip",
-        float(d_grad_clip),
-        "--label_smoothing",
-        float(label_smoothing),
+        "--d_grad_max_norm",
+        float(d_grad_max_norm),
+        "--d_label_smoothing",
+        float(d_label_smoothing),
     )
 
     notes, (resolved_g, resolved_d) = yield from _drain(
@@ -414,52 +408,55 @@ def training_tab():
             batch_size = gr.Slider(
                 minimum=1, maximum=128, step=1, value=14, label="Батч"
             )
-        with gr.Accordion("Дополнительно", open=True):
-            with gr.Group():
-                with gr.Row(equal_height=True):
-                    vocoder = gr.Dropdown(VOCODERS, value=DEFAULT_VOCODER, label="Вокодер")
-                    optimizer = gr.Dropdown(OPTIMIZERS, value="AdamW", label="Оптимизатор")
-                    gpus = gr.Textbox("0", label="GPU")
-                with gr.Row(equal_height=True):
-                    pretrain = gr.Dropdown(
-                        pretrain_choices(DEFAULT_VOCODER, 48000),
-                        value=default_pretrain(DEFAULT_VOCODER, 48000),
-                        label="Претрейн",
-                        scale=1,
-                    )
-                    pretrain_g = gr.Textbox(
-                        label="Свой претрейн G",
-                        placeholder="Путь или URL к .pth — вместо встроенного",
-                        scale=2,
-                    )
-                    pretrain_d = gr.Textbox(
-                        label="Свой претрейн D",
-                        placeholder="Путь или URL к .pth — вместо встроенного",
-                        scale=2,
-                    )
-                with gr.Row(equal_height=True):
-                    save_to_zip = gr.Checkbox(False, label="Собрать ZIP в конце")
-                    save_half = gr.Checkbox(False, label="Половинная точность")
-                with gr.Accordion("Стабилизация обучения", open=False):
-                    gr.Markdown(
-                        "Настройки для опытных пользователей - изменяйте, только если знаете что делаете."
-                    )
-                    with gr.Row():
-                        d_lr_multiplier = gr.Slider(
-                            minimum=0.1, maximum=1.0, step=0.05, value=1.0,
-                            label="d_lr_multiplier",
-                            info="1.0 = как у генератора, 0.25 = в 4 раза медленнее."
-                        )
-                        d_grad_clip = gr.Slider(
-                            minimum=0.0, maximum=500.0, step=5.0, value=0.0,
-                            label="d_grad_clip",
-                            info="0.0 = выкл."
-                        )
-                        label_smoothing = gr.Slider(
-                            minimum=0.0, maximum=0.2, step=0.01, value=0.0,
-                            label="d_label_smoothing",
-                            info="0.0 = выкл."
-                        )
+        with gr.Row(equal_height=True):
+            pretrain = gr.Dropdown(
+                pretrain_choices(DEFAULT_VOCODER, 48000),
+                value=default_pretrain(DEFAULT_VOCODER, 48000),
+                label="Претрейн",
+                scale=1,
+            )
+            pretrain_g = gr.Textbox(
+                label="Свой претрейн G",
+                placeholder="Путь или URL к .pth — вместо встроенного",
+                scale=2,
+            )
+            pretrain_d = gr.Textbox(
+                label="Свой претрейн D",
+                placeholder="Путь или URL к .pth — вместо встроенного",
+                scale=2,
+            )
+        with gr.Row(equal_height=True):
+            save_to_zip = gr.Checkbox(False, label="Собрать ZIP в конце")
+            save_half = gr.Checkbox(False, label="Половинная точность моделей")
+        with gr.Accordion("Стабилизация обучения", open=False):
+            gr.Markdown(
+                "Настройки для опытных пользователей - изменяйте, только если знаете что делаете."
+            )
+            with gr.Row():
+                d_lr_multiplier = gr.Slider(
+                    minimum=0.1,
+                    maximum=1.0,
+                    step=0.05,
+                    value=1.0,
+                    label="Скорость обучения D",
+                    info="Множитель к скорости G: 1.0 = как у G, 0.25 = в 4 раза медленнее.",
+                )
+                d_grad_max_norm = gr.Slider(
+                    minimum=0.0,
+                    maximum=500.0,
+                    step=5.0,
+                    value=0.0,
+                    label="Потолок градиентов D",
+                    info="Потолок суммарной нормы градиентов D. 0.0 = выкл.",
+                )
+                d_label_smoothing = gr.Slider(
+                    minimum=0.0,
+                    maximum=0.2,
+                    step=0.01,
+                    value=0.0,
+                    label="Сглаживание меток D",
+                    info="Цели D: real = 1-s, fake = s - D менее самоуверен. 0.0 = выкл.",
+                )
         with gr.Row(equal_height=True):
             train_btn = gr.Button("Запустить обучение", variant="primary")
             stop_btn = gr.Button("Завершить процесс", variant="stop")
@@ -472,14 +469,13 @@ def training_tab():
     model_name.change(
         _step_states, inputs=model_name, outputs=step_buttons, api_name=False
     )
-    # Список претрейнов зависит и от вокодера, и от частоты.
-    for trigger in (vocoder, sample_rate):
-        trigger.change(
-            _refresh_pretrains,
-            inputs=[vocoder, sample_rate, pretrain],
-            outputs=pretrain,
-            api_name=False,
-        )
+    # Список претрейнов зависит от частоты.
+    sample_rate.change(
+        _refresh_pretrains,
+        inputs=[sample_rate, pretrain],
+        outputs=pretrain,
+        api_name=False,
+    )
     slice_btn.click(
         _slice_dataset,
         inputs=[
@@ -505,17 +501,14 @@ def training_tab():
             total_epoch,
             save_every_epoch,
             batch_size,
-            vocoder,
-            optimizer,
-            gpus,
             pretrain,
             pretrain_g,
             pretrain_d,
             save_to_zip,
             save_half,
             d_lr_multiplier,
-            d_grad_clip,
-            label_smoothing,
+            d_grad_max_norm,
+            d_label_smoothing,
         ],
         outputs=log,
     )

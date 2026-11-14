@@ -4,7 +4,7 @@ import os
 
 import gradio as gr
 
-from gradio_ui.common import PROJECT_ROOT
+from gradio_ui.common import PROJECT_ROOT, swap_buttons, swap_visibility
 
 UPSCALE_OUTPUT_DIR = os.path.join(PROJECT_ROOT, "output", "Upscale_output")
 DEFAULT_SPLIT_DIR = os.path.join(PROJECT_ROOT, "assets", "models", "pretrains")
@@ -113,94 +113,154 @@ def _upscale_audio(
     return gr.Audio(output_path, label=os.path.basename(output_path))
 
 
-def _convert_tb_to_txt(tb_files, epochs_mode=True) -> list[str]:
-    """Читает файлы событий TensorBoard и возвращает список путей к .txt файлам."""
-    if not tb_files:
-        raise gr.Error("Прикрепите хотя бы один файл событий TensorBoard (.0, .1 или events.out.tfevents).")
-
-    try:
-        from tensorboard.backend.event_processing.event_accumulator import (
-            EventAccumulator,
-        )
-    except ImportError as error:
-        raise gr.Error("Библиотека tensorboard не установлена.") from error
-
+def _read_tb_scalars(path):
+    """Читает скаляры event-файла: {tag: {step: value}} и время первой записи."""
     import shutil
     import tempfile
+
+    from tensorboard.backend.event_processing.event_accumulator import EventAccumulator
+
+    temp_tb_dir = tempfile.mkdtemp()
+    try:
+        # EventAccumulator узнаёт файл по подстроке "tfevents" в имени
+        temp_file_path = os.path.join(temp_tb_dir, "events.out.tfevents.0")
+        shutil.copy2(path, temp_file_path)
+        event_acc = EventAccumulator(temp_file_path)
+        event_acc.Reload()
+        tags = event_acc.Tags()
+        data = {}
+        start_time = None
+        for tag in tags.get("scalars", []):
+            events = event_acc.Scalars(tag)
+            if not events:
+                continue
+            data[tag] = {event.step: event.value for event in events}
+            first = events[0].wall_time
+            start_time = first if start_time is None else min(start_time, first)
+        return data, start_time, tags
+    finally:
+        shutil.rmtree(temp_tb_dir, ignore_errors=True)
+
+
+def _format_scalar_lines(data, epochs_mode):
+    """Строки отчёта по скалярам вида {tag: {step: value}}."""
+    unit = "Эпоха" if epochs_mode else "Шаг"
+    lines = []
+    for tag in sorted(data):
+        steps = data[tag]
+        if not steps:
+            continue
+        precision = 10 if "learning rate" in tag.lower() else 6
+        fmt = f".{precision}f"
+        lines.append(f"\n{tag}:")
+        for step in sorted(steps):
+            lines.append(f"     [{unit} {step}] - {steps[step]:{fmt}}")
+    return lines
+
+
+def _convert_tb_to_txt(
+    tb_files, tb_paths="", epochs_mode=True, merge_files=True
+) -> list[str]:
+    """Читает файлы событий TensorBoard и возвращает список путей к .txt файлам."""
+    sources = list(tb_files) if tb_files else []
+    if tb_paths and tb_paths.strip():
+        for line in tb_paths.replace(";", "\n").splitlines():
+            candidate = line.strip().strip('"').strip("'")
+            if candidate:
+                sources.append(candidate)
+    if not sources:
+        raise gr.Error(
+            "Прикрепите файлы событий TensorBoard (.0, .1 или events.out.tfevents) "
+            "или укажите путь к ним."
+        )
+
+    import importlib.util
+
+    if importlib.util.find_spec("tensorboard") is None:
+        raise gr.Error("Библиотека tensorboard не установлена.")
 
     temp_dir = os.path.join(PROJECT_ROOT, "output", "tb_converted")
     os.makedirs(temp_dir, exist_ok=True)
 
     output_paths = []
     skipped_files = []
+    runs = []
 
-    if not isinstance(tb_files, list):
-        tb_files = [tb_files]
-
-    for tb_file in tb_files:
+    for tb_file in sources:
         path = _uploaded_path(tb_file)
         if not path or not os.path.isfile(path):
             skipped_files.append(f"{os.path.basename(str(tb_file))} (файл не найден)")
             continue
 
-        temp_tb_dir = tempfile.mkdtemp()
-        temp_file_path = os.path.join(temp_tb_dir, "events.out.tfevents.0")
         try:
-            shutil.copy2(path, temp_file_path)
-            event_acc = EventAccumulator(temp_file_path)
-            event_acc.Reload()
+            data, start_time, tags = _read_tb_scalars(path)
         except Exception as error:
             skipped_files.append(f"{os.path.basename(path)} (ошибка чтения: {error})")
-            shutil.rmtree(temp_tb_dir, ignore_errors=True)
             continue
-        finally:
-            shutil.rmtree(temp_tb_dir, ignore_errors=True)
 
-        tags = event_acc.Tags()
-        scalar_tags = tags.get('scalars', [])
-
-        if not scalar_tags:
-            all_tags_info = {k: (len(v) if isinstance(v, list) else v) for k, v in tags.items()}
+        if not data:
+            all_tags_info = {
+                k: (len(v) if isinstance(v, list) else v) for k, v in tags.items()
+            }
             skipped_files.append(
                 f"{os.path.basename(path)} (нет скаляров, найдено: {all_tags_info})"
             )
             continue
 
-        lines = []
-        lines.append(f"Файл: {os.path.basename(path)}")
+        if start_time is None:
+            start_time = os.path.getmtime(path)
+        runs.append((path, data, start_time))
+
+    # Хронологический порядок: продолжение обучения перекрывает ранние записи
+    runs.sort(key=lambda run: run[2])
+
+    if merge_files and runs:
+        merged = {}
+        dropped = 0
+        for _, data, _ in runs:
+            for tag, steps in data.items():
+                target = merged.setdefault(tag, {})
+                start = min(steps)
+                # Эпохи после чекпоинта пересчитаны — старые записи недействительны
+                stale = [step for step in target if step >= start]
+                for step in stale:
+                    del target[step]
+                dropped += len(stale)
+                target.update(steps)
+
+        lines = [f"Объединено файлов: {len(runs)}"]
+        lines.extend(f"  • {os.path.basename(path)}" for path, _, _ in runs)
+        if dropped:
+            lines.append(f"Отброшено устаревших записей: {dropped}")
         lines.append("=" * 60)
-        unit = "Эпоха" if epochs_mode else "Шаг"
+        lines.extend(_format_scalar_lines(merged, epochs_mode))
 
-        for tag in sorted(scalar_tags):
-            events = event_acc.Scalars(tag)
-            if not events:
-                continue
-
-            precision = 10 if "learning rate" in tag.lower() else 6
-            fmt = f".{precision}f"
-
-            lines.append(f"\n{tag}:")
-            for e in events:
-                lines.append(f"     [{unit} {e.step}] - {e.value:{fmt}}")
-
-        txt_content = "\n".join(lines)
-
-        base_name = os.path.splitext(os.path.basename(path))[0]
-        if "events.out.tfevents" in base_name:
-            clean_name = base_name.replace("events.out.tfevents", "metrics").replace(".", "_")
-        else:
-            clean_name = base_name
-
-        txt_filename = f"{clean_name}_converted.txt"
-        txt_path = os.path.join(temp_dir, txt_filename)
-
+        txt_path = os.path.join(temp_dir, "metrics_merged_converted.txt")
         with open(txt_path, "w", encoding="utf-8") as f:
-            f.write(txt_content)
-
+            f.write("\n".join(lines))
         output_paths.append(txt_path)
+    else:
+        for path, data, _ in runs:
+            lines = [f"Файл: {os.path.basename(path)}", "=" * 60]
+            lines.extend(_format_scalar_lines(data, epochs_mode))
+
+            base_name = os.path.splitext(os.path.basename(path))[0]
+            if "events.out.tfevents" in base_name:
+                clean_name = base_name.replace(
+                    "events.out.tfevents", "metrics"
+                ).replace(".", "_")
+            else:
+                clean_name = base_name
+
+            txt_path = os.path.join(temp_dir, f"{clean_name}_converted.txt")
+            with open(txt_path, "w", encoding="utf-8") as f:
+                f.write("\n".join(lines))
+            output_paths.append(txt_path)
 
     if skipped_files:
-        warning_text = "Пропущены файлы:\n" + "\n".join(f"• {name}" for name in skipped_files)
+        warning_text = "Пропущены файлы:\n" + "\n".join(
+            f"• {name}" for name in skipped_files
+        )
         gr.Warning(warning_text)
 
     if not output_paths:
@@ -301,29 +361,69 @@ def tools_tab():
 
     with gr.Accordion("Конвертация TensorBoard eval файлов .0 в .txt", open=False):
         gr.Markdown(
-            "Загрузите один или несколько файлов событий TensorBoard (например, `events.out.tfevents...0`), "
-            "чтобы преобразовать их метрики (loss, lr и др.) в удобный читаемый текстовый формат."
+            "Загрузите один или несколько файлов событий TensorBoard (например, `events.out.tfevents...0`) "
+            "чтобы преобразовать метрики (loss, lr и др.) в удобный читаемый текстовый формат."
         )
         with gr.Row():
-            tb_files = gr.File(
-                label="Файлы TensorBoard",
-                file_types=[".0", ".1", ".tfevents"],
-                file_count="multiple"
-            )
+            with gr.Column(scale=2):
+                with gr.Column() as tb_upload:
+                    tb_files = gr.File(
+                        label="Файлы событий TensorBoard",
+                        file_types=[".0", ".1", ".tfevents"],
+                        file_count="multiple",
+                    )
+                with gr.Column(visible=False) as tb_enter:
+                    tb_path = gr.Textbox(
+                        label="Путь к файлам событий:",
+                        info="Можно несколько путей через «;».",
+                    )
+                with gr.Row():
+                    tb_show_upload_btn = gr.Button(
+                        value="Загрузить файлы с устройства",
+                        visible=False,
+                    )
+                    tb_show_enter_btn = gr.Button(value="Ввести путь к файлу")
             tb_file_output = gr.File(
                 label="Скачать результаты (.txt)",
                 file_count="multiple",
-                interactive=False
+                interactive=False,
+                scale=3,
             )
         epochs_mode = gr.Checkbox(
             label="Эпохи вместо шагов",
             value=True,
             info="В MistRVC метрики пишутся раз в эпоху. Снимите галочку для сторонних event-файлов, где значения логируются по шагам.",
         )
+        merge_files = gr.Checkbox(
+            label="Схлопнуть файлы",
+            value=True,
+            info="Схлопывает все файлы одной тренировки в один .txt. Снимите галочку, чтобы получить отдельный .txt на каждый файл (для файлов разных моделей).",
+        )
         convert_tb_btn = gr.Button("Конвертировать", variant="primary")
+
+        tb_show_upload_btn.click(
+            swap_visibility,
+            outputs=[tb_upload, tb_enter, tb_path, tb_files],
+            api_name=False,
+        )
+        tb_show_enter_btn.click(
+            swap_visibility,
+            outputs=[tb_enter, tb_upload, tb_path, tb_files],
+            api_name=False,
+        )
+        tb_show_upload_btn.click(
+            swap_buttons,
+            outputs=[tb_show_upload_btn, tb_show_enter_btn],
+            api_name=False,
+        )
+        tb_show_enter_btn.click(
+            swap_buttons,
+            outputs=[tb_show_enter_btn, tb_show_upload_btn],
+            api_name=False,
+        )
 
         convert_tb_btn.click(
             _convert_tb_to_txt,
-            inputs=[tb_files, epochs_mode],
-            outputs=[tb_file_output]
+            inputs=[tb_files, tb_path, epochs_mode, merge_files],
+            outputs=[tb_file_output],
         )

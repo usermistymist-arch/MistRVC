@@ -16,7 +16,9 @@ def feature_loss(fmap_r, fmap_g):
     return loss, fm_per_disc
 
 
-def discriminator_loss(disc_real_outputs, disc_generated_outputs, label_smoothing=0.0):
+def discriminator_loss(
+    disc_real_outputs, disc_generated_outputs, d_label_smoothing=0.0
+):
     """Compute the discriminator loss for real and generated outputs with optional label smoothing.
 
     Returns:
@@ -26,8 +28,8 @@ def discriminator_loss(disc_real_outputs, disc_generated_outputs, label_smoothin
     r_losses = []
     g_losses = []
     for dr, dg in zip(disc_real_outputs, disc_generated_outputs):
-        r_loss = torch.mean((1.0 - label_smoothing - dr.float()) ** 2)
-        g_loss = torch.mean((0.0 + label_smoothing - dg.float()) ** 2)
+        r_loss = torch.mean((1.0 - d_label_smoothing - dr.float()) ** 2)
+        g_loss = torch.mean((0.0 + d_label_smoothing - dg.float()) ** 2)
         loss += r_loss + g_loss
         r_losses.append(r_loss)
         g_losses.append(g_loss)

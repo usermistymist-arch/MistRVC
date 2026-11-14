@@ -13,6 +13,28 @@ os.environ["USE_LIBUV"] = "0" if sys.platform == "win32" else "1"
 logging.basicConfig(level=logging.WARNING)
 warnings.filterwarnings("ignore")
 
+
+# TensorBoard тянет предустановленный в Colab/Kaggle TensorFlow, чей импорт сыплет
+# «Could not find cuda drivers» (TF_CPP_MIN_LOG_LEVEL эти строки не глушит).
+# Заглушка notf переключает TensorBoard на tensorflow_stub. В ноутбуке это делает
+# ячейка установки; здесь — страховка для запуска вне ноутбука (Kaggle, CLI).
+def _disable_tensorflow():
+    import importlib.util
+
+    spec = importlib.util.find_spec("tensorboard")
+    if spec and spec.origin:
+        notf = os.path.join(os.path.dirname(spec.origin), "compat", "notf.py")
+        if not os.path.exists(notf):
+            try:
+                with open(notf, "w", encoding="utf-8") as f:
+                    f.write("# tensorflow_stub\n")
+            except OSError:
+                pass
+
+
+_disable_tensorflow()
+
+
 import argparse
 import datetime
 import json
@@ -116,15 +138,9 @@ def get_hparams():
     parser.add_argument(
         "--save_half", type=_strtobool, choices=[True, False], default=True
     )
-    parser.add_argument(
-        "--d_lr_multiplier", type=float, default=1.0
-    )
-    parser.add_argument(
-        "--d_grad_clip", type=float, default=0.0
-    )
-    parser.add_argument(
-        "--label_smoothing", type=float, default=0.0
-    )
+    parser.add_argument("--d_lr_multiplier", type=float, default=1.0)
+    parser.add_argument("--d_grad_max_norm", type=float, default=0.0)
+    parser.add_argument("--d_label_smoothing", type=float, default=0.0)
     args = parser.parse_args()
 
     experiment_dir = os.path.join(args.experiment_dir, args.model_name)
@@ -153,8 +169,8 @@ def get_hparams():
     hparams.save_to_zip = args.save_to_zip
     hparams.save_half = args.save_half
     hparams.d_lr_multiplier = args.d_lr_multiplier
-    hparams.d_grad_clip = args.d_grad_clip
-    hparams.label_smoothing = args.label_smoothing
+    hparams.d_grad_max_norm = args.d_grad_max_norm
+    hparams.d_label_smoothing = args.d_label_smoothing
     hparams.data.training_files = f"{experiment_dir}/data/filelist.txt"
 
     print(" \n\nПАРАМЕТРЫ ОБУЧЕНИЯ ")
@@ -168,11 +184,14 @@ def get_hparams():
     print(f"{'Вокодер:':<30} {hparams.model.vocoder}")
     print(f"{'Оптимизатор:':<30} {hparams.optimizer}")
     if args.pretrain_g:
-        print(f"{'Pretrain G:':<30} {hparams.pretrain_g}")
+        print(f"{'Претрейн G:':<30} {hparams.pretrain_g}")
     if args.pretrain_d:
-        print(f"{'Pretrain D:':<30} {hparams.pretrain_d}")
+        print(f"{'Претрейн D:':<30} {hparams.pretrain_d}")
     print(f"{'Сохранение в ZIP:':<30} {'Да' if hparams.save_to_zip else 'Нет'}")
     print(f"{'Точность моделей:':<30} {'float16' if hparams.save_half else 'float32'}")
+    print(f"{'Скорость обучения D:':<30} {hparams.d_lr_multiplier}")
+    print(f"{'Потолок градиентов D:':<30} {hparams.d_grad_max_norm}")
+    print(f"{'Сглаживание меток D:':<30} {hparams.d_label_smoothing}")
     print("=" * 70 + "\n")
     return hparams
 
@@ -542,7 +561,7 @@ def train_and_evaluate(
         # Discriminator loss
         y_d_hat_r, y_d_hat_g, _, _ = net_d(wave, y_hat.detach())
         loss_disc, r_losses, g_losses = discriminator_loss(
-            y_d_hat_r, y_d_hat_g, label_smoothing=hps.label_smoothing
+            y_d_hat_r, y_d_hat_g, d_label_smoothing=hps.d_label_smoothing
         )
         loss_disc_r = sum(r_losses)
         loss_disc_g = sum(g_losses)
@@ -550,8 +569,10 @@ def train_and_evaluate(
         loss_disc.backward()
 
         # Gradient clipping
-        if hps.d_grad_clip > 0:
-            torch.nn.utils.clip_grad_norm_(net_d.parameters(), max_norm=hps.d_grad_clip)
+        if hps.d_grad_max_norm > 0:
+            torch.nn.utils.clip_grad_norm_(
+                net_d.parameters(), max_norm=hps.d_grad_max_norm
+            )
 
         grad_norm_d = grad_norm(net_d.parameters())
         optim_d.step()
@@ -707,25 +728,8 @@ def train_and_evaluate(
                 flush=True,
             )
 
-            # Финальная эпоха
+            # Архивирование
             if is_final_epoch:
-                # Сохранение last модели
-                last_path = os.path.join(
-                    hps.model_dir, f"{hps.model_name}_e{epoch}_s{global_step}_last.pth"
-                )
-                print(
-                    extract_model(
-                        hps,
-                        checkpoint_state,
-                        epoch,
-                        global_step,
-                        last_path,
-                        hps.save_half,
-                    ),
-                    flush=True,
-                )
-
-                # Архивирование
                 if hps.save_to_zip:
                     import zipfile
 
@@ -733,9 +737,11 @@ def train_and_evaluate(
                     with zipfile.ZipFile(
                         zip_filename, "w", zipfile.ZIP_DEFLATED
                     ) as zipf:
-                        # Добавляем last модель
-                        if os.path.exists(last_path):
-                            zipf.write(last_path, os.path.basename(last_path))
+                        # Добавляем модель последней эпохи из weights
+                        if os.path.exists(intermediate_path):
+                            zipf.write(
+                                intermediate_path, os.path.basename(intermediate_path)
+                            )
                         # Добавляем index
                         index_path = os.path.join(
                             hps.model_dir, f"{hps.model_name}.index"
