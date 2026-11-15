@@ -406,7 +406,7 @@ def training_tab():
                 minimum=1, maximum=200, step=1, value=20, label="Сохранять каждые N"
             )
             batch_size = gr.Slider(
-                minimum=1, maximum=128, step=1, value=14, label="Батч"
+                minimum=1, maximum=128, step=1, value=16, label="Батч"
             )
         with gr.Row(equal_height=True):
             pretrain = gr.Dropdown(

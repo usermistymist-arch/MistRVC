@@ -38,6 +38,7 @@ _disable_tensorflow()
 import argparse
 import datetime
 import json
+import math
 from collections import defaultdict
 from random import randint
 from time import time as ttime
@@ -464,6 +465,25 @@ def run(hps, rank, n_gpus, device, device_id):
             scheduler_d = torch.optim.lr_scheduler.ExponentialLR(
                 optim_d, gamma=hps.train.lr_decay, last_epoch=epoch_str - 2
             )
+
+        if epoch_str > 1:
+            steps_done = epoch_str - 1
+            if hps.optimizer in ("AdaBelief", "PolOpt"):
+                for optim in (optim_g, optim_d):
+                    for group in optim.param_groups:
+                        base = group["initial_lr"]
+                        group["lr"] = (
+                            1e-6
+                            + (base - 1e-6)
+                            * (1 + math.cos(math.pi * steps_done / hps.total_epoch))
+                            / 2
+                        )
+            else:
+                for optim in (optim_g, optim_d):
+                    for group in optim.param_groups:
+                        group["lr"] = (
+                            group["initial_lr"] * hps.train.lr_decay**steps_done
+                        )
 
         # Проверка: не превышает ли загруженная эпоха целевую
         if epoch_str > hps.total_epoch:
