@@ -10,7 +10,7 @@ SETTINGS_FILE = os.path.join(SETTINGS_DIR, "settings.json")
 # Дефолтные настройки
 DEFAULT_SETTINGS = {
     "theme_color": "teal",
-    "infer_name_template": "{PITCH_SHIFT} {NAME} ({MODEL}_{SPEAKER})",
+    "infer_name_template": "{PITCH_SHIFT}{ }{NAME} - {MODEL}{_}{SPEAKER}",
 }
 
 # Список поддерживаемых цветов Gradio (отображаемое имя, внутреннее значение)

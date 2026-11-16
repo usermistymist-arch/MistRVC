@@ -26,7 +26,6 @@ from gradio_ui.jobs import command, request_stop, run_job
 
 SAMPLE_RATES = [32000, 40000, 48000]
 DEFAULT_VOCODER = "HiFi-GAN"
-DEFAULT_OPTIMIZER = "AdamW"
 DEFAULT_GPUS = "0"
 F0_METHODS = ["rmvpe", "hpa-rmvpe"]
 AUDIO_EXTENSIONS = (
@@ -330,8 +329,6 @@ def _train_model(
         int(sample_rate),
         "--vocoder",
         DEFAULT_VOCODER,
-        "--optimizer",
-        DEFAULT_OPTIMIZER,
         "--gpus",
         DEFAULT_GPUS,
         "--save_to_zip",
@@ -394,7 +391,9 @@ def training_tab():
                 extract_btn = gr.Button(
                     "2. Извлечь", variant="primary", interactive=False
                 )
-                index_btn = gr.Button("3. Построить индекс", interactive=False)
+                index_btn = gr.Button(
+                    "3. Построить индекс", variant="primary", interactive=False
+                )
 
     with gr.Group():
         _section_hint("checkpoint.pth")

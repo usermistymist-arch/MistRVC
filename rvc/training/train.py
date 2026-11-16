@@ -38,7 +38,6 @@ _disable_tensorflow()
 import argparse
 import datetime
 import json
-import math
 from collections import defaultdict
 from random import randint
 from time import time as ttime
@@ -124,12 +123,6 @@ def get_hparams():
         choices=["HiFi-GAN", "MRF HiFi-GAN", "RefineGAN"],
         default="HiFi-GAN",
     )
-    parser.add_argument(
-        "--optimizer",
-        type=str,
-        choices=["AdamW", "AdaBelief", "PolOpt"],
-        default="AdamW",
-    )
     parser.add_argument("--pretrain_g", type=str, default=None)
     parser.add_argument("--pretrain_d", type=str, default=None)
     parser.add_argument("--gpus", type=str, default="0")
@@ -163,7 +156,6 @@ def get_hparams():
     hparams.total_epoch = args.total_epoch
     hparams.save_every_epoch = args.save_every_epoch
     hparams.batch_size = args.batch_size
-    hparams.optimizer = args.optimizer
     hparams.pretrain_g = args.pretrain_g
     hparams.pretrain_d = args.pretrain_d
     hparams.gpus = args.gpus
@@ -183,7 +175,7 @@ def get_hparams():
     print(f"{'Размер батча:':<30} {hparams.batch_size}")
     print(f"{'Частота дискретизации:':<30} {hparams.data.sample_rate} Hz")
     print(f"{'Вокодер:':<30} {hparams.model.vocoder}")
-    print(f"{'Оптимизатор:':<30} {hparams.optimizer}")
+    print(f"{'Оптимизатор:':<30} AdamW")
     if args.pretrain_g:
         print(f"{'Претрейн G:':<30} {hparams.pretrain_g}")
     if args.pretrain_d:
@@ -323,53 +315,18 @@ def run(hps, rank, n_gpus, device, device_id):
             net_g = net_g.to(device)
             net_d = net_d.to(device)
 
-        if hps.optimizer == "AdaBelief":
-            from rvc._library.optimizers.AdaBelief import AdaBelief
-
-            optim_g = AdaBelief(
-                net_g.parameters(),
-                lr=hps.train.learning_rate,
-                betas=hps.train.betas,
-                eps=1e-8,
-            )
-            optim_d = AdaBelief(
-                net_d.parameters(),
-                lr=hps.train.learning_rate * hps.d_lr_multiplier,
-                betas=hps.train.betas,
-                eps=1e-8,
-            )
-        elif hps.optimizer == "PolOpt":
-            from rvc._library.optimizers.PolOpt import PolOpt
-
-            optim_g = PolOpt(
-                net_g.parameters(),
-                lr=hps.train.learning_rate,
-                betas=(0.8, 0.99),
-                eps=1e-7,
-                weight_decay=0.01,
-                max_step_clip=1.0,
-            )
-            optim_d = PolOpt(
-                net_d.parameters(),
-                lr=hps.train.learning_rate * 1.5 * hps.d_lr_multiplier,
-                betas=(0.5, 0.99),
-                eps=1e-7,
-                weight_decay=0.01,
-                max_step_clip=1.0,
-            )
-        else:
-            optim_g = torch.optim.AdamW(
-                net_g.parameters(),
-                hps.train.learning_rate,
-                betas=hps.train.betas,
-                eps=hps.train.eps,
-            )
-            optim_d = torch.optim.AdamW(
-                net_d.parameters(),
-                hps.train.learning_rate * hps.d_lr_multiplier,
-                betas=hps.train.betas,
-                eps=hps.train.eps,
-            )
+        optim_g = torch.optim.AdamW(
+            net_g.parameters(),
+            hps.train.learning_rate,
+            betas=hps.train.betas,
+            eps=hps.train.eps,
+        )
+        optim_d = torch.optim.AdamW(
+            net_d.parameters(),
+            hps.train.learning_rate * hps.d_lr_multiplier,
+            betas=hps.train.betas,
+            eps=hps.train.eps,
+        )
 
         if n_gpus > 1 and device.type == "cuda":
             net_g = DDP(net_g, device_ids=[device_id])
@@ -451,39 +408,18 @@ def run(hps, rank, n_gpus, device, device_id):
                 )
 
         # Настройка scheduler
-        if hps.optimizer in ("AdaBelief", "PolOpt"):
-            scheduler_g = torch.optim.lr_scheduler.CosineAnnealingLR(
-                optim_g, T_max=hps.total_epoch, eta_min=1e-6, last_epoch=epoch_str - 2
-            )
-            scheduler_d = torch.optim.lr_scheduler.CosineAnnealingLR(
-                optim_d, T_max=hps.total_epoch, eta_min=1e-6, last_epoch=epoch_str - 2
-            )
-        else:
-            scheduler_g = torch.optim.lr_scheduler.ExponentialLR(
-                optim_g, gamma=hps.train.lr_decay, last_epoch=epoch_str - 2
-            )
-            scheduler_d = torch.optim.lr_scheduler.ExponentialLR(
-                optim_d, gamma=hps.train.lr_decay, last_epoch=epoch_str - 2
-            )
+        scheduler_g = torch.optim.lr_scheduler.ExponentialLR(
+            optim_g, gamma=hps.train.lr_decay, last_epoch=epoch_str - 2
+        )
+        scheduler_d = torch.optim.lr_scheduler.ExponentialLR(
+            optim_d, gamma=hps.train.lr_decay, last_epoch=epoch_str - 2
+        )
 
         if epoch_str > 1:
             steps_done = epoch_str - 1
-            if hps.optimizer in ("AdaBelief", "PolOpt"):
-                for optim in (optim_g, optim_d):
-                    for group in optim.param_groups:
-                        base = group["initial_lr"]
-                        group["lr"] = (
-                            1e-6
-                            + (base - 1e-6)
-                            * (1 + math.cos(math.pi * steps_done / hps.total_epoch))
-                            / 2
-                        )
-            else:
-                for optim in (optim_g, optim_d):
-                    for group in optim.param_groups:
-                        group["lr"] = (
-                            group["initial_lr"] * hps.train.lr_decay**steps_done
-                        )
+            for optim in (optim_g, optim_d):
+                for group in optim.param_groups:
+                    group["lr"] = group["initial_lr"] * hps.train.lr_decay**steps_done
 
         # Проверка: не превышает ли загруженная эпоха целевую
         if epoch_str > hps.total_epoch:

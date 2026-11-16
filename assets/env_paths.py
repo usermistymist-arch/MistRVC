@@ -4,9 +4,8 @@
 модели хранятся раздельно (диск блокнота эфемерен, модели — в постоянном
 хранилище). Касается только обучения: остальное всегда пишется в репозиторий.
 
-Colab повторяет схему PolTrain_Colab.ipynb: код в /content/, модели в
-SAVE_DIR на Google Drive. Kaggle — схему PolTrain_kaggle.ipynb: код
-в /kaggle/working/, модели в SAVE_DIR там же.
+Colab: код в /content/, модели в SAVE_DIR на Google Drive.
+Kaggle: код в /kaggle/working/, модели в SAVE_DIR там же.
 """
 
 import os

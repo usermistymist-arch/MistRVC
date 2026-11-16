@@ -127,24 +127,34 @@ def get_vc(model_path):
     return cpt, net_g, tgt_sr, vc
 
 
-# Собирает путь выходного файла вида `<имя>_(<модель>).<формат>`
+# Gradio 5.x пропускает в имени файла только буквы/цифры и "._-, ",
+# поэтому обычный "+" при скачивании вырезается. Для положительного питча
+# берём символ-букву, который фильтр не трогает:
+#   "十" (U+5341) — полноразмерный плюс, "ᐩ" (U+1429) — компактный приподнятый.
+PLUS_SIGN = "十"
+
+
+# Собирает путь выходного файла по шаблону из настроек
 def build_output_path(
     input_path,
     output_dir,
     rvc_model,
     output_format,
     speaker_name=None,
-    filename_template="{NAME}_({MODEL}_{SPEAKER})",
+    filename_template="{PITCH_SHIFT}{ }{NAME} - {MODEL}{_}{SPEAKER}",
     rvc_pitch=0,
 ):
     base_name = os.path.splitext(os.path.basename(input_path))[0]
-    if len(base_name) > 100:
-        gr.Warning("Имя файла превышает 100 символов и будет сокращено для удобства.")
-        base_name = f"{base_name[:25]}... (MistRVC)"
+    if len(base_name) > 120:
+        gr.Warning("Имя файла превышает 120 символов и будет сокращено для удобства.")
+        base_name = f"{base_name[:61]}..."
     os.makedirs(output_dir, exist_ok=True)
 
     speaker_str = speaker_name if speaker_name else ""
-    pitch_shift_str = f"{rvc_pitch:+g}" if rvc_pitch != 0 else ""
+    pitch_shift_str = ""
+    if rvc_pitch:
+        sign = PLUS_SIGN if rvc_pitch > 0 else "-"
+        pitch_shift_str = f"{sign}{abs(rvc_pitch):g}"
     filename = (
         filename_template.replace("{NAME}", base_name)
         .replace("{MODEL}", rvc_model)
@@ -152,13 +162,13 @@ def build_output_path(
         .replace("{PITCH_SHIFT}", pitch_shift_str)
     )
 
-    # Очистка от лишних символов, если SPEAKER пустой (например, "_{SPEAKER}" -> "")
-    if not speaker_str:
-        filename = (
-            filename.replace("_{SPEAKER}", "")
-            .replace("{SPEAKER}_", "")
-            .replace("{SPEAKER}", "")
-        )
+    # Опциональные разделители: { } -> пробел, {_} -> "_".
+    # Если после подстановки ключей они оказались по краям имени — убираются:
+    # пустой {PITCH_SHIFT} не оставляет ведущий пробел, а пустой {SPEAKER} — висящее "_".
+    filename = filename.replace("{ }", " ").replace("{_}", "_").strip(" _")
+    filename = filename.replace("+", PLUS_SIGN)
+    if not filename:
+        filename = base_name
 
     return os.path.join(output_dir, f"{filename}.{output_format}")
 
@@ -319,7 +329,7 @@ def rvc_infer(
     output_format="wav",
     speaker_id=0,
     speaker_name="",
-    filename_template="{NAME}_({MODEL}_{SPEAKER})",
+    filename_template="{PITCH_SHIFT}{ }{NAME} - {MODEL}{_}{SPEAKER}",
     progress=gr.Progress(track_tqdm=True),
 ):
     if not rvc_model:
@@ -396,7 +406,7 @@ def rvc_batch_infer(
     output_format="wav",
     speaker_id=0,
     speaker_name="",
-    filename_template="{NAME}_({MODEL}_{SPEAKER})",
+    filename_template="{PITCH_SHIFT}{ }{NAME} - {MODEL}{_}{SPEAKER}",
     progress=gr.Progress(track_tqdm=True),
 ):
     if not rvc_model:

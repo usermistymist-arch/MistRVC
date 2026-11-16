@@ -71,8 +71,9 @@ def create_parser():
     base.add_argument(
         "--filename_template",
         type=str,
-        default="{NAME}_({MODEL}_{SPEAKER})",
-        help="Шаблон имени выходного файла. Ключи: {NAME}, {MODEL}, {SPEAKER}, {PITCH_SHIFT}",
+        default="{PITCH_SHIFT}{ }{NAME} - {MODEL}{_}{SPEAKER}",
+        help="Шаблон имени выходного файла. Ключи: {NAME}, {MODEL}, {SPEAKER}, {PITCH_SHIFT}; "
+        "опциональные разделители: { } и {_} (убираются, если стоят по краям имени файла)",
     )
 
     # Главный парсер с субкомандами

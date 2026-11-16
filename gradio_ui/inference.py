@@ -82,7 +82,7 @@ def _convert(
 
     settings = load_settings()
     filename_template = settings.get(
-        "infer_name_template", "{NAME}_({MODEL}_{SPEAKER})"
+        "infer_name_template", DEFAULT_SETTINGS["infer_name_template"]
     )
 
     # Преобразуем имя спикера в ID и получаем его текстовое имя
@@ -139,7 +139,7 @@ def _convert_batch(
 
     settings = load_settings()
     filename_template = settings.get(
-        "infer_name_template", "{NAME}_({MODEL}_{SPEAKER})"
+        "infer_name_template", DEFAULT_SETTINGS["infer_name_template"]
     )
 
     # Преобразуем имя спикера в ID и получаем его текстовое имя
@@ -382,12 +382,15 @@ def _conversion_settings_tab():
     with gr.Column():
         gr.Markdown("### 📁 Именование файлов")
         gr.Markdown(
-            "Шаблон имени выходного файла при конвертации. Доступные ключи: `{PITCH_SHIFT}`, `{NAME}`, `{MODEL}`, `{SPEAKER}`."
+            "Шаблон имени выходного файла при конвертации. Доступные ключи: "
+            "`{PITCH_SHIFT}`, `{NAME}`, `{MODEL}`, `{SPEAKER}`. "
+            "Опциональные разделители: `{ }` (пробел) и `{_}` (нижнее подчёркивание) — "
+            "если после подстановки оказались по краям имени - убираются."
         )
         template_input = gr.Textbox(
             label="Шаблон имени файла",
             value=current_template,
-            info="Пример: {PITCH_SHIFT} {NAME} ({MODEL}_{SPEAKER})",
+            info="Пример: {PITCH_SHIFT}{ }{NAME} - {MODEL}{_}{SPEAKER}",
         )
         save_template_btn = gr.Button(
             "Сохранить настройки именования", variant="primary"
