@@ -157,6 +157,9 @@ def run_job(title: str, commands: list, prefix: str = ""):
             with _lock:
                 if _stop_requested:
                     break
+            # Аргументы могли дописаться в cmd после command(): приводим к str,
+            # иначе join и Popen падают на числах.
+            cmd = [str(part) for part in cmd]
             lines.append(f"$ {' '.join(cmd)}")
             proc = _spawn(cmd)
             last_yield = 0.0

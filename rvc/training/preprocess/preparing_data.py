@@ -3,7 +3,7 @@ import os
 import sys
 import traceback
 import warnings
-from random import shuffle
+from random import Random
 
 # Установка переменных окружения и отключение предупреждений
 os.environ["CUDA_VISIBLE_DEVICES"] = "0"
@@ -298,7 +298,7 @@ def generate_filelist(model_path: str, sample_rate: int, include_mutes: int = 2)
             ):
                 valid_names.append(name)
 
-        for name in valid_names:
+        for name in sorted(valid_names):
             options.append(
                 f"{os.path.join(speaker_gt_dir, name)}.wav|"
                 f"{os.path.join(speaker_feature_dir, name)}.npy|"
@@ -320,7 +320,7 @@ def generate_filelist(model_path: str, sample_rate: int, include_mutes: int = 2)
                     f"{mute_audio_path}|{mute_feature_path}|{mute_f0_path}|{mute_f0nsf_path}|{speaker_id}"
                 )
 
-    shuffle(options)
+    Random(0).shuffle(options)
 
     with open(
         os.path.join(model_path, "data", "filelist.txt"), "w", encoding="utf-8"

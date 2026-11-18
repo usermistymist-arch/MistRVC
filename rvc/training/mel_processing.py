@@ -6,6 +6,24 @@ mel_basis = {}
 hann_window = {}
 
 
+def _reflect_pad_1d(x: torch.Tensor, pad: int) -> torch.Tensor:
+    """Отражающее дополнение как F.pad(mode="reflect"), но с детерминированным backward.
+
+    CUDA-ядро reflection_pad1d_backward недетерминировано (атомарные сложения
+    на краях). Срез + разворот + склейка дают те же значения, а их backward
+    детерминирован. Требует pad < длины сигнала — для сегментов обучения
+    (17280 сэмплов при максимальном pad 2048) это всегда выполняется.
+    """
+    if pad <= 0:
+        return x
+    if x.shape[-1] <= pad:
+        # Многократное отражение: сюда обучение не попадает, оставляем как было.
+        return torch.nn.functional.pad(x, (pad, pad), mode="reflect")
+    left = x[..., 1 : pad + 1].flip(-1)
+    right = x[..., -(pad + 1) : -1].flip(-1)
+    return torch.cat([left, x, right], dim=-1)
+
+
 def spectrogram_torch(y, n_fft, hop_size, win_size, center=False):
     """Compute the spectrogram of a signal using STFT.
 
@@ -144,13 +162,17 @@ class MultiScaleMelSpectrogramLoss(torch.nn.Module):
                 window_length, device=wav.device, dtype=torch.float32
             )
 
-        wav = wav.squeeze(1)
+        wav = wav.squeeze(1).float()
+        # torch.stft(center=True) дополняет сигнал reflect-ом, чей CUDA-backward
+        # недетерминирован. Дополняем сами эквивалентно и считаем без center.
+        wav = _reflect_pad_1d(wav, window_length // 2)
 
         stft = torch.stft(
-            wav.float(),
+            wav,
             n_fft=window_length,
             hop_length=hop_length,
             window=self.hann_window[win_dtype_device],
+            center=False,
             return_complex=True,
         )
 

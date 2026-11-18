@@ -1,5 +1,6 @@
 import logging
 import os
+import random
 import sys
 import warnings
 
@@ -12,6 +13,9 @@ os.environ["USE_LIBUV"] = "0" if sys.platform == "win32" else "1"
 # Настройка логирования и подавление предупреждений
 logging.basicConfig(level=logging.WARNING)
 warnings.filterwarnings("ignore")
+# Предупреждения warn_only называют операции без детерминированной реализации.
+# Перекрывает ignore.
+warnings.filterwarnings("default", message=".*deterministic implementation.*")
 
 
 # TensorBoard тянет предустановленный в Colab/Kaggle TensorFlow, чей импорт сыплет
@@ -42,6 +46,7 @@ from collections import defaultdict
 from random import randint
 from time import time as ttime
 
+import numpy as np
 import torch
 import torch.distributed as dist
 import torch.multiprocessing as mp
@@ -135,13 +140,18 @@ def get_hparams():
     parser.add_argument("--d_lr_multiplier", type=float, default=1.0)
     parser.add_argument("--d_grad_max_norm", type=float, default=0.0)
     parser.add_argument("--d_label_smoothing", type=float, default=0.0)
+    parser.add_argument("--seed", type=int, default=None)
+    parser.add_argument("--deterministic", action="store_true")
     args = parser.parse_args()
+    if args.seed is not None and not 0 <= args.seed <= 2**32 - 1:
+        parser.error("--seed должен быть целым числом от 0 до 4294967295")
 
     experiment_dir = os.path.join(args.experiment_dir, args.model_name)
     config_save_path = os.path.join(experiment_dir, "data", "config.json")
 
     # Генерация файла конфигурации
-    if not os.path.exists(config_save_path):
+    config_existed = os.path.isfile(config_save_path)
+    if not config_existed:
         from rvc._library.config import generate_config
 
         generate_config(config_save_path, args.sample_rate, args.vocoder)
@@ -149,6 +159,31 @@ def get_hparams():
     # Загрузка файла конфигурации
     with open(config_save_path, encoding="utf-8") as f:
         config = json.load(f)
+
+    train_config = config.setdefault("train", {})
+    saved_seed = int(train_config.get("seed", 1032003))
+    seed_locked = (
+        config_existed
+        or bool(train_config.get("seed_locked", False))
+        or os.path.isfile(os.path.join(experiment_dir, "checkpoint.pth"))
+    )
+    seed_ignored = None
+    if seed_locked:
+        if args.seed is not None and args.seed != saved_seed:
+            seed_ignored = int(args.seed)
+            print(
+                f"⚠️ Сид модели «{args.model_name}» зафиксирован: {saved_seed}. "
+                f"Передан {seed_ignored} — менять сид посреди тренировки нельзя.\n"
+                f"Обучение принудительно продолжится с сидом {saved_seed} "
+                f"(хранится в {config_save_path}, поле train.seed). "
+                "Для другого сида создайте новую модель.",
+                flush=True,
+            )
+    else:
+        train_config["seed"] = saved_seed if args.seed is None else int(args.seed)
+        train_config["seed_locked"] = True
+        with open(config_save_path, "w", encoding="utf-8") as f:
+            json.dump(config, f, ensure_ascii=False, indent=2)
 
     hparams = HParams(**config)
     hparams.model_dir = experiment_dir
@@ -164,6 +199,9 @@ def get_hparams():
     hparams.d_lr_multiplier = args.d_lr_multiplier
     hparams.d_grad_max_norm = args.d_grad_max_norm
     hparams.d_label_smoothing = args.d_label_smoothing
+    hparams.deterministic = args.deterministic
+    if args.deterministic:
+        os.environ["CUBLAS_WORKSPACE_CONFIG"] = ":4096:8"
     hparams.data.training_files = f"{experiment_dir}/data/filelist.txt"
 
     print(" \n\nПАРАМЕТРЫ ОБУЧЕНИЯ ")
@@ -185,6 +223,14 @@ def get_hparams():
     print(f"{'Скорость обучения D:':<30} {hparams.d_lr_multiplier}")
     print(f"{'Потолок градиентов D:':<30} {hparams.d_grad_max_norm}")
     print(f"{'Сглаживание меток D:':<30} {hparams.d_label_smoothing}")
+    seed_note = ""
+    if seed_ignored is not None:
+        seed_note = f" — переданный {seed_ignored} отклонён"
+    print(f"{'Сид:':<30} {hparams.train.seed}{seed_note}")
+    print(
+        f"{'Детерминированное обучение:':<30} "
+        f"{'Да' if hparams.deterministic else 'Нет'}"
+    )
     print("=" * 70 + "\n")
     return hparams
 
@@ -274,6 +320,21 @@ def run(hps, rank, n_gpus, device, device_id):
         )
 
         torch.manual_seed(hps.train.seed)
+        random.seed(hps.train.seed)
+        np.random.seed(hps.train.seed)
+        if hps.deterministic:
+            torch.backends.cudnn.deterministic = True
+            torch.backends.cudnn.benchmark = False
+            torch.set_float32_matmul_precision("highest")
+            torch.backends.cuda.matmul.allow_tf32 = False
+            torch.backends.cudnn.allow_tf32 = False
+            torch.use_deterministic_algorithms(True, warn_only=False)
+            if rank == 0:
+                print(
+                    "Детерминированный режим: TF32 выключен, cudnn.deterministic=True. "
+                    "Обучение будет медленнее.",
+                    flush=True,
+                )
         if torch.cuda.is_available():
             torch.cuda.set_device(device_id)
 
@@ -286,6 +347,7 @@ def run(hps, rank, n_gpus, device, device_id):
             num_replicas=n_gpus,
             rank=rank,
             shuffle=True,
+            seed=hps.train.seed,
         )
         train_loader = DataLoader(
             train_dataset,

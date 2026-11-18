@@ -27,6 +27,7 @@ from gradio_ui.jobs import command, request_stop, run_job
 SAMPLE_RATES = [32000, 40000, 48000]
 DEFAULT_VOCODER = "HiFi-GAN"
 DEFAULT_GPUS = "0"
+DEFAULT_SEED = 1032003
 F0_METHODS = ["rmvpe", "hpa-rmvpe"]
 AUDIO_EXTENSIONS = (
     ".wav",
@@ -210,6 +211,72 @@ def _check_config(
     )
 
 
+def _locked_seed(exp_dir: str):
+    """Сид существующей модели или None, если сид ещё можно выбрать.
+
+    Источник — `data/config.json`: он создаётся при первом запуске
+    обучения и с этого момента хранит сид модели (`train.seed`).
+    `checkpoint.pth` — страховка на случай утраченного конфига.
+    """
+    config_path = os.path.join(exp_dir, "data", "config.json")
+    if os.path.isfile(config_path):
+        try:
+            with open(config_path, encoding="utf-8") as file:
+                train_config = json.load(file).get("train", {})
+            return int(train_config.get("seed", DEFAULT_SEED))
+        except (OSError, ValueError, TypeError):
+            return None
+    if os.path.isfile(os.path.join(exp_dir, "checkpoint.pth")):
+        return DEFAULT_SEED
+    return None
+
+
+def _seed_state(model_name):
+    """Поле сида по имени модели: подставляет сид существующей и блокирует его.
+
+    Вызывается тем же событием ввода имени, что и доступность кнопок 1/2/3
+    (`_step_states`). Значение свободного поля не сбрасывается: ввод имени
+    не должен затирать сид, выбранный пользователем для новой модели.
+    """
+    name = (model_name or "").strip()
+    exp_dir = _exp_dir(name) if name else ""
+    locked = _locked_seed(exp_dir) if name else None
+    if locked is not None:
+        return gr.update(
+            value=locked,
+            interactive=False,
+            info=f"Сид модели «{name}» зафиксирован в data/config.json — менять его нельзя.",
+        )
+    if name and os.path.isdir(exp_dir):
+        return gr.update(
+            interactive=True,
+            info="Модель существует, но обучение ещё не запускалось: сид можно выбрать "
+            "до первого запуска, после он будет зафиксирован.",
+        )
+    return gr.update(
+        interactive=True,
+        info="Зерно случайности: инициализация emb_g, случайные срезы и шум, порядок батчей. "
+        "Фиксируется при первом запуске обучения.",
+    )
+
+
+def _seed_on_start(model_name, seed):
+    """Блокирует поле сида в момент нажатия «Запустить обучение».
+
+    Обучение фиксирует сид в конфиге первым же действием, но основной
+    обработчик завершится только через часы, поэтому поле блокируется
+    заранее — и сразу с зафиксированным значением, если оно есть на диске.
+    """
+    name = (model_name or "").strip()
+    locked = _locked_seed(_exp_dir(name)) if name else None
+    value = locked if locked is not None else seed
+    return gr.update(
+        value=value if value is not None else DEFAULT_SEED,
+        interactive=False,
+        info="Обучение запущено: сид зафиксирован и не может быть изменён.",
+    )
+
+
 def _url_pretrain_path(kind: str, url: str) -> str:
     """Локальное имя для претрейна из URL: имя файла + хеш ссылки.
 
@@ -289,6 +356,17 @@ def _drain(generator):
         return lines, done.value
 
 
+def _prefixed(note: str, generator):
+    """Генератор с предупреждающей строкой в начале журнала.
+
+    `_drain` накапливает её вместе с последующими строками, поэтому
+    предупреждение видно сразу и не теряется на следующих этапах задачи.
+    """
+    if note:
+        yield note
+    return (yield from generator)
+
+
 def _train_model(
     model_name,
     sample_rate,
@@ -303,6 +381,8 @@ def _train_model(
     d_lr_multiplier,
     d_grad_max_norm,
     d_label_smoothing,
+    seed,
+    deterministic,
 ):
     model_name = _require_name(model_name)
     logs_dir = _require_logs_dir()
@@ -313,6 +393,17 @@ def _train_model(
         )
     vocoder = DEFAULT_VOCODER
     _check_config(model_name, exp_dir, vocoder, int(sample_rate))
+    locked_seed = _locked_seed(exp_dir)
+    seed_note = ""
+    if locked_seed is not None and seed is not None and int(seed) != locked_seed:
+        # Сид посреди тренировки менять нельзя: запуск не прерываем, а
+        # принудительно продолжаем с зафиксированным сидом и предупреждаем.
+        seed_note = (
+            f"⚠️ Сид модели «{model_name}» зафиксирован: {locked_seed}. "
+            f"Передан {int(seed)} — менять сид посреди тренировки нельзя. "
+            f"Обучение принудительно продолжится с сидом {locked_seed}. "
+            "Для другого сида создайте новую модель."
+        )
     cmd = command(
         "rvc.training.train",
         "--experiment_dir",
@@ -342,10 +433,17 @@ def _train_model(
         "--d_label_smoothing",
         float(d_label_smoothing),
     )
+    if locked_seed is None:
+        cmd += ["--seed", str(int(seed) if seed is not None else DEFAULT_SEED)]
+    if deterministic:
+        cmd.append("--deterministic")
 
     notes, (resolved_g, resolved_d) = yield from _drain(
-        _resolve_pretrains(
-            pretrain, pretrain_g, pretrain_d, vocoder, int(sample_rate), exp_dir
+        _prefixed(
+            seed_note,
+            _resolve_pretrains(
+                pretrain, pretrain_g, pretrain_d, vocoder, int(sample_rate), exp_dir
+            ),
         ),
     )
     if resolved_g and resolved_d:
@@ -456,6 +554,21 @@ def training_tab():
                     label="Сглаживание меток D",
                     info="Цели D: real = 1-s, fake = s - D менее самоуверен. 0.0 = выкл.",
                 )
+        with gr.Accordion("Воспроизводимость", open=False):
+            with gr.Row(equal_height=True):
+                seed = gr.Number(
+                    value=DEFAULT_SEED,
+                    precision=0,
+                    minimum=0,
+                    maximum=2**31 - 1,
+                    label="Сид обучения",
+                    info="Зерно случайности: инициализация emb_g, случайные срезы и шум, порядок батчей.",
+                )
+                deterministic = gr.Checkbox(
+                    value=False,
+                    label="Детерминировать обучение",
+                    info="Повторяемость прогонов при одинаковом сиде. Обучение будет медленнее.",
+                )
         with gr.Row(equal_height=True):
             train_btn = gr.Button("Запустить обучение", variant="primary")
             stop_btn = gr.Button("Завершить процесс", variant="stop")
@@ -468,6 +581,7 @@ def training_tab():
     model_name.change(
         _step_states, inputs=model_name, outputs=step_buttons, api_name=False
     )
+    model_name.change(_seed_state, inputs=model_name, outputs=seed, api_name=False)
     # Список претрейнов зависит от частоты.
     sample_rate.change(
         _refresh_pretrains,
@@ -493,6 +607,12 @@ def training_tab():
         outputs=log,
     ).then(_step_states, inputs=model_name, outputs=step_buttons, api_name=False)
     train_btn.click(
+        _seed_on_start,
+        inputs=[model_name, seed],
+        outputs=seed,
+        queue=False,
+        api_name=False,
+    ).then(
         _train_model,
         inputs=[
             model_name,
@@ -508,9 +628,12 @@ def training_tab():
             d_lr_multiplier,
             d_grad_max_norm,
             d_label_smoothing,
+            seed,
+            deterministic,
         ],
         outputs=log,
-    )
+        queue=True,
+    ).then(_seed_state, inputs=model_name, outputs=seed, api_name=False)
     index_btn.click(_train_index, inputs=model_name, outputs=log).then(
         _step_states,
         inputs=model_name,

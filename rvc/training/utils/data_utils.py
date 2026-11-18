@@ -243,6 +243,14 @@ class DistributedBucketSampler(torch.utils.data.distributed.DistributedSampler):
         num_replicas (int, optional): Number of processes participating in distributed training. Defaults to None.
         rank (int, optional): Rank of the current process. Defaults to None.
         shuffle (bool, optional): Whether to shuffle the data. Defaults to True.
+        seed (int, optional): Base seed of the shuffle generator. Defaults to 0.
+
+    Note:
+        Зерно каждой эпохи — `seed + epoch`, где `epoch` задаётся вызовом
+        `set_epoch()` (см. `train_and_evaluate`). Поэтому порядок батчей
+        воспроизводится при одном и том же `seed` и меняется при его смене;
+        пары (`seed`, `epoch`) с одинаковой суммой дают одинаковый порядок.
+        При `shuffle=False` зерно не используется.
 
     """
 
@@ -254,8 +262,11 @@ class DistributedBucketSampler(torch.utils.data.distributed.DistributedSampler):
         num_replicas=None,
         rank=None,
         shuffle=True,
+        seed=0,
     ):
-        super().__init__(dataset, num_replicas=num_replicas, rank=rank, shuffle=shuffle)
+        super().__init__(
+            dataset, num_replicas=num_replicas, rank=rank, shuffle=shuffle, seed=seed
+        )
         self.lengths = dataset.lengths
         self.batch_size = batch_size
         self.boundaries = boundaries
@@ -291,7 +302,7 @@ class DistributedBucketSampler(torch.utils.data.distributed.DistributedSampler):
     def __iter__(self):
         """Iterates over batches of data samples."""
         g = torch.Generator()
-        g.manual_seed(self.epoch)
+        g.manual_seed(self.seed + self.epoch)
 
         indices = []
         if self.shuffle:

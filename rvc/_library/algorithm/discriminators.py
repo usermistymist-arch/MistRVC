@@ -131,7 +131,13 @@ class DiscriminatorP(torch.nn.Module):
         b, c, t = x.shape
         if t % self.period != 0:
             n_pad = self.period - (t % self.period)
-            x = torch.nn.functional.pad(x, (0, n_pad), "reflect")
+            # CUDA-backward отражающего дополнения недетерминирован (атомарные
+            # сложения на краях). Срез + разворот + склейка дают те же значения
+            # на forward, а их backward детерминирован.
+            if t > n_pad:
+                x = torch.cat([x, x[..., -(n_pad + 1) : -1].flip(-1)], dim=-1)
+            else:
+                x = torch.nn.functional.pad(x, (0, n_pad), "reflect")
         x = x.view(b, c, -1, self.period)
 
         for conv in self.convs:
@@ -183,7 +189,14 @@ class DiscriminatorR(torch.nn.Module):
     def spectrogram(self, x):
         n_fft, hop_length, win_length = self.resolution
         pad = int((n_fft - hop_length) / 2)
-        x = F.pad(x, (pad, pad), mode="reflect").squeeze(1)
+        # Детерминированный аналог F.pad(mode="reflect") для x[..., t], t > pad.
+        if x.shape[-1] > pad:
+            x = torch.cat(
+                [x[..., 1 : pad + 1].flip(-1), x, x[..., -(pad + 1) : -1].flip(-1)],
+                dim=-1,
+            ).squeeze(1)
+        else:
+            x = F.pad(x, (pad, pad), mode="reflect").squeeze(1)
         x = torch.stft(
             x,
             n_fft=n_fft,
