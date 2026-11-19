@@ -570,7 +570,19 @@ _DISC_NAMES = {
     "MRF HiFi-GAN": ["S", "P2", "P3", "P5", "P7", "P11", "P17", "P23", "P37"],
     "RefineGAN": ["S", "P2", "P3", "P5", "P7", "P11", "R1024", "R2048", "R512"],
 }
-_MEL_SCALE_NAMES = ["5", "10", "20", "40", "80", "160", "320", "480"]
+# Мел-масштабы (порядок n_mels в MultiScaleMelSpectrogramLoss) → группа.
+# coarse — огибающая энергии, mid — форманты, fine — гармоническая деталь.
+# Внутри группы кривые почти совпадают, отдельные теги дублировали сумму.
+_MEL_SCALE_GROUPS = {
+    "5": "coarse",
+    "10": "coarse",
+    "20": "mid",
+    "40": "mid",
+    "80": "mid",
+    "160": "fine",
+    "320": "fine",
+    "480": "fine",
+}
 
 
 def train_and_evaluate(
@@ -694,10 +706,20 @@ def train_and_evaluate(
         # равна grad/norm_d, и дублировать её в графиках незачем.
         if grad_norm_d_pre is not None:
             acc_update_dict["grad/norm_d_pre_clip"] = grad_norm_d_pre
+        # FM группируем по типу входа: S — сырой waveform, P — периодная
+        # развёртка, R — спектрограмма (только RefineGAN).
+        fm_groups = {}
         for name, fml in zip(disc_names, fm_per_disc):
-            acc_update_dict[f"loss/g/fm_{name}"] = fml
-        for i, ms in enumerate(mel_per_scale_scaled):
-            acc_update_dict[f"loss/g/mel_scale_n{_MEL_SCALE_NAMES[i]}"] = ms
+            group = name[0]
+            fm_groups[group] = fm_groups.get(group, 0.0) + fml
+        for group, value in fm_groups.items():
+            acc_update_dict[f"loss/g/fm_{group}"] = value
+        # Mel группируем по разрешению окна (см. _MEL_SCALE_GROUPS)
+        mel_groups = {}
+        for (name, group), ms in zip(_MEL_SCALE_GROUPS.items(), mel_per_scale_scaled):
+            mel_groups[group] = mel_groups.get(group, 0.0) + ms
+        for group, value in mel_groups.items():
+            acc_update_dict[f"loss/g/mel_{group}"] = value
         acc.update(**acc_update_dict)
         # KL нормируется на число валидных кадров, а не на батч
         acc.update_weighted("loss/g/kl", loss_kl, z_mask.sum())
