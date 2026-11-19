@@ -79,18 +79,16 @@ def spec_to_mel_torch(spec, n_fft, num_mels, sample_rate, fmin, fmax):
 
     """
     global mel_basis
-    dtype_device = str(spec.dtype) + "_" + str(spec.device)
-    fmax_dtype_device = str(fmax) + "_" + dtype_device
-    if fmax_dtype_device not in mel_basis:
+    # Ключ обязан включать все параметры, от которых зависит банк фильтров.
+    key = (sample_rate, n_fft, num_mels, fmin, fmax, spec.dtype, spec.device)
+    if key not in mel_basis:
         mel = librosa_mel_fn(
             sr=sample_rate, n_fft=n_fft, n_mels=num_mels, fmin=fmin, fmax=fmax
         )
-        mel_basis[fmax_dtype_device] = torch.from_numpy(mel).to(
-            dtype=spec.dtype, device=spec.device
-        )
+        mel_basis[key] = torch.from_numpy(mel).to(dtype=spec.dtype, device=spec.device)
 
-    melspec = torch.matmul(mel_basis[fmax_dtype_device], spec)
-    melspec = torch.log(melspec.clamp(min=1e-5) * 1)
+    melspec = torch.matmul(mel_basis[key], spec)
+    melspec = torch.log(melspec.clamp(min=1e-5))
     return melspec
 
 

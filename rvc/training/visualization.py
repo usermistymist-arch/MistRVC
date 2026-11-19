@@ -64,6 +64,12 @@ def _estimate_f0_autocorr(
     if frame_length <= 4 or wav.size(-1) < frame_length:
         return wav.new_zeros((wav.size(0), 1)).to(original_device)
 
+    # Центрируем кадры: кадр k должен описывать момент k*hop, как pitchf датасета
+    # (RMVPE считает мел с center=True). Без дополнения центр смещён на +20 мс.
+    # Нулями, а не reflect: краевые кадры получат низкий rms и будут отброшены.
+    pad = frame_length // 2
+    wav = F.pad(wav, (pad, pad))
+
     frames = wav.unfold(-1, frame_length, hop_length)
     frames = frames - frames.mean(dim=-1, keepdim=True)
     window = torch.hann_window(frame_length, device=wav.device, dtype=wav.dtype)
@@ -81,8 +87,23 @@ def _estimate_f0_autocorr(
 
     peak_region = autocorr[..., min_lag : max_lag + 1]
     peak_values, peak_indices = peak_region.max(dim=-1)
-    lag = peak_indices + min_lag
-    f0 = sample_rate / lag.clamp_min(1).float()
+
+    # Целый лаг квантует частоту с шагом f0^2/sr: на 1100 Гц это ~40 центов,
+    # на 500 Гц ~18. Парабола по трём отсчётам даёт дробный лаг и убирает
+    # этот шумовой пол измерителя.
+    idx = peak_indices.unsqueeze(-1)
+    last = peak_region.size(-1) - 1
+    left = peak_region.gather(-1, (idx - 1).clamp_min(0)).squeeze(-1)
+    right = peak_region.gather(-1, (idx + 1).clamp_max(last)).squeeze(-1)
+    # В вершине знаменатель неположительный; clamp_max страхует от деления на 0
+    denom = (left - 2.0 * peak_values + right).clamp_max(-1e-12)
+    delta = (0.5 * (left - right) / denom).clamp(-0.5, 0.5)
+    # На краях диапазона соседей нет — интерполировать нечего
+    inner = (peak_indices > 0) & (peak_indices < last)
+    delta = torch.where(inner, delta, torch.zeros_like(delta))
+
+    lag = (peak_indices + min_lag).float() + delta
+    f0 = sample_rate / lag.clamp_min(1.0)
 
     periodicity = peak_values / autocorr[..., 0].clamp_min(1e-8)
     voiced = (rms > 0.003) & (periodicity > 0.25)
@@ -104,10 +125,15 @@ def _slice_pitch(pitchf, ids_slice, segment_frames, device):
 
 
 def f0_error_cents(y_hat, pitchf, ids_slice, sample_rate, hop_length, segment_frames):
-    """Средняя ошибка F0 в центах между сгенерированным аудио и pitchf датасета.
+    """Ошибка F0 в центах: (среднее, медиана, число кадров).
 
-    Меньше = лучше. 100 cents = 1 полутон. Метрика считается только на voiced
-    кадрах, где и y_hat, и target pitchf имеют ненулевой F0.
+    Меньше = лучше. 100 cents = 1 полутон. Считается только на voiced кадрах,
+    где и y_hat, и target pitchf имеют ненулевой F0.
+
+    Медиана устойчива к единичным октавным промахам: если среднее заметно
+    больше медианы, метрику тянут выбросы, а не общий строй. Число кадров
+    показывает вес цифры. Если сравнивать нечего (батч из мьютов), вместо
+    заглушки возвращаем None — в графике будет пропуск, а не «катастрофа».
     """
     fake_f0 = _estimate_f0_autocorr(y_hat, sample_rate, hop_length)
     target_f0 = _slice_pitch(pitchf, ids_slice, segment_frames, fake_f0.device)
@@ -117,8 +143,9 @@ def f0_error_cents(y_hat, pitchf, ids_slice, sample_rate, hop_length, segment_fr
     target_f0 = target_f0[..., :frames]
 
     voiced_mask = (fake_f0 > 0.0) & (target_f0 > 0.0)
-    if not voiced_mask.any():
-        return torch.as_tensor(2400.0, device=y_hat.device)
+    count = int(voiced_mask.sum())
+    if count == 0:
+        return None, None, 0
 
     cents_error = 1200.0 * torch.abs(
         torch.log2(
@@ -126,4 +153,5 @@ def f0_error_cents(y_hat, pitchf, ids_slice, sample_rate, hop_length, segment_fr
             / target_f0[voiced_mask].clamp_min(1e-5)
         ),
     )
-    return cents_error.clamp(max=2400.0).mean()
+    cents_error = cents_error.clamp(max=2400.0)
+    return cents_error.mean(), cents_error.median(), count

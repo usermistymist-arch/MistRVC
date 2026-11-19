@@ -13,8 +13,8 @@ os.environ["USE_LIBUV"] = "0" if sys.platform == "win32" else "1"
 # Настройка логирования и подавление предупреждений
 logging.basicConfig(level=logging.WARNING)
 warnings.filterwarnings("ignore")
-# Предупреждения warn_only называют операции без детерминированной реализации.
-# Перекрывает ignore.
+# Страховка для режима warn_only=True: такие предупреждения называют операции
+# без детерминированной реализации. При warn_only=False они не нужны — там падение.
 warnings.filterwarnings("default", message=".*deterministic implementation.*")
 
 
@@ -40,7 +40,6 @@ _disable_tensorflow()
 
 
 import argparse
-import datetime
 import json
 from collections import defaultdict
 from random import randint
@@ -169,6 +168,12 @@ def get_hparams():
     )
     seed_ignored = None
     if seed_locked:
+        # Конфиг мог приехать без поля seed: дописываем фолбэк, иначе
+        # hparams.train.seed не будет существовать вовсе.
+        if "seed" not in train_config:
+            train_config["seed"] = saved_seed
+            with open(config_save_path, "w", encoding="utf-8") as f:
+                json.dump(config, f, ensure_ascii=False, indent=2)
         if args.seed is not None and args.seed != saved_seed:
             seed_ignored = int(args.seed)
             print(
@@ -235,22 +240,16 @@ def get_hparams():
     return hparams
 
 
-class EpochRecorder:
-    def __init__(self):
-        self.last_time = ttime()
-
-    def record(self):
-        now_time = ttime()
-        elapsed_time = round(now_time - self.last_time, 1)
-        self.last_time = now_time
-        return f"[{datetime.timedelta(seconds=int(elapsed_time))!s}]"
-
-
 class MetricsAccumulator:
-    """Аккумулятор метрик для вычисления средних значений за эпоху."""
+    """Среднее по батчам за интервал log_interval.
+
+    Создаётся один раз в run() и живёт между эпохами; обнуляется методом
+    reset() после записи метрик. При log_interval = 1 интервал равен эпохе.
+    """
 
     def __init__(self):
         self.sums = defaultdict(float)
+        self.weights = defaultdict(float)
         self.count = 0
 
     def update(self, **kwargs):
@@ -258,8 +257,55 @@ class MetricsAccumulator:
         for k, v in kwargs.items():
             self.sums[k] += v.item() if hasattr(v, "item") else v
 
+    def update_weighted(self, key, value, weight):
+        """Метрика со своим весом (например, KL — по числу валидных кадров)."""
+        value = value.item() if hasattr(value, "item") else value
+        weight = weight.item() if hasattr(weight, "item") else weight
+        self.sums[key] += value * weight
+        self.weights[key] += weight
+
+    def reduce_across_ranks(self, device_id):
+        """Суммирует накопленное по всем ранкам: метрики описывают все данные.
+
+        Коллективная операция — вызывается на всех ранках одновременно.
+        После неё average() считается по батчам всех GPU, а не только rank 0.
+        """
+        if not dist.is_initialized() or dist.get_world_size() == 1:
+            return
+        keys = sorted(self.sums)
+        payload = (
+            [self.sums[k] for k in keys]
+            + [self.weights.get(k, 0.0) for k in keys]
+            + [float(self.count)]
+        )
+        # NCCL требует тензоры на GPU, gloo работает с CPU
+        target = (
+            torch.device(f"cuda:{device_id}")
+            if dist.get_backend().lower() == "nccl"
+            else torch.device("cpu")
+        )
+        tensor = torch.tensor(payload, dtype=torch.float64, device=target)
+        dist.all_reduce(tensor, op=dist.ReduceOp.SUM)
+        values = tensor.tolist()
+        n = len(keys)
+        for i, k in enumerate(keys):
+            self.sums[k] = values[i]
+            if k in self.weights:
+                self.weights[k] = values[n + i]
+        self.count = int(values[2 * n])
+
     def average(self):
-        return {k: v / self.count for k, v in self.sums.items()} if self.count else {}
+        if not self.count:
+            return {}
+        # Взвешенные метрики делятся на свой вес, остальные — на число батчей
+        return {
+            k: v / (self.weights.get(k, 0) or self.count) for k, v in self.sums.items()
+        }
+
+    def reset(self):
+        self.sums.clear()
+        self.weights.clear()
+        self.count = 0
 
 
 def main():
@@ -493,7 +539,9 @@ def run(hps, rank, n_gpus, device, device_id):
             return
 
         print("\nЗапуск процесса обучения модели...", flush=True)
-        epoch_recorder = EpochRecorder() if rank == 0 else None
+        # Аккумулятор живёт между эпохами: при log_interval > 1 метрики
+        # копятся за весь интервал, а не выбрасываются через эпоху.
+        metrics_acc = MetricsAccumulator()
         for epoch in range(epoch_str, hps.total_epoch + 1):
             train_and_evaluate(
                 hps,
@@ -506,7 +554,7 @@ def run(hps, rank, n_gpus, device, device_id):
                 fn_mel_loss,
                 device,
                 device_id,
-                epoch_recorder,
+                metrics_acc,
             )
             scheduler_g.step()
             scheduler_d.step()
@@ -536,7 +584,7 @@ def train_and_evaluate(
     fn_mel_loss,
     device,
     device_id,
-    epoch_recorder=None,
+    acc,
 ):
     global global_step
 
@@ -547,7 +595,6 @@ def train_and_evaluate(
     net_g.train()
     net_d.train()
 
-    acc = MetricsAccumulator()
     last_batch = None
     disc_names = _DISC_NAMES[hps.model.vocoder]
 
@@ -561,6 +608,7 @@ def train_and_evaluate(
         disable=rank != 0,
         file=sys.stdout,
     )
+    epoch_start = ttime()
     for _, info in enumerate(progress):
         if device.type == "cuda":
             info = [tensor.cuda(device_id, non_blocking=True) for tensor in info]
@@ -586,9 +634,12 @@ def train_and_evaluate(
         optim_d.zero_grad()
         loss_disc.backward()
 
-        # Gradient clipping
+        # Gradient clipping. clip_grad_norm_ возвращает норму ДО обрезки:
+        # берём её, чтобы видеть реальный масштаб градиентов D,
+        # а не срезанный потолком.
+        grad_norm_d_pre = None
         if hps.d_grad_max_norm > 0:
-            torch.nn.utils.clip_grad_norm_(
+            grad_norm_d_pre = torch.nn.utils.clip_grad_norm_(
                 net_d.parameters(), max_norm=hps.d_grad_max_norm
             )
 
@@ -600,25 +651,25 @@ def train_and_evaluate(
         d_score_g = torch.stack([dg.float().mean() for dg in y_d_hat_g]).mean()
 
         # Generator loss
-        for _ in range(1):
-            _, y_d_hat_g, fmap_r, fmap_g = net_d(wave, y_hat)
-            loss_mel_raw, mel_per_scale = fn_mel_loss(wave, y_hat)
-            loss_mel = loss_mel_raw * hps.train.c_mel / 3.0
-            mel_per_scale_scaled = [l * hps.train.c_mel / 3.0 for l in mel_per_scale]
-            loss_kl = kl_loss(z_p, logs_q, m_p, logs_p, z_mask) * hps.train.c_kl
-            loss_fm, fm_per_disc = feature_loss(fmap_r, fmap_g)
-            loss_gen = generator_loss(y_d_hat_g)
-            loss_gen_all = loss_gen + loss_fm + loss_mel + loss_kl
-            optim_g.zero_grad()
-            loss_gen_all.backward()
-            grad_norm_g = grad_norm(net_g.parameters())
-            # Per-component gradient norms
-            g_model = net_g.module if hasattr(net_g, "module") else net_g
-            grad_norm_enc_p = grad_norm(g_model.enc_p.parameters())
-            grad_norm_dec = grad_norm(g_model.dec.parameters())
-            grad_norm_enc_q = grad_norm(g_model.enc_q.parameters())
-            grad_norm_flow = grad_norm(g_model.flow.parameters())
-            optim_g.step()
+        _, y_d_hat_g, fmap_r, fmap_g = net_d(wave, y_hat)
+        loss_mel_raw, mel_per_scale = fn_mel_loss(wave, y_hat)
+        loss_mel = loss_mel_raw * hps.train.c_mel / 3.0
+        mel_per_scale_scaled = [l * hps.train.c_mel / 3.0 for l in mel_per_scale]
+        loss_kl = kl_loss(z_p, logs_q, m_p, logs_p, z_mask) * hps.train.c_kl
+        loss_fm, fm_per_disc = feature_loss(fmap_r, fmap_g)
+        loss_gen = generator_loss(y_d_hat_g)
+        loss_gen_all = loss_gen + loss_fm + loss_mel + loss_kl
+        optim_g.zero_grad()
+        loss_gen_all.backward()
+        grad_norm_g = grad_norm(net_g.parameters())
+        # Per-component gradient norms
+        g_model = net_g.module if hasattr(net_g, "module") else net_g
+        grad_norm_enc_p = grad_norm(g_model.enc_p.parameters())
+        grad_norm_dec = grad_norm(g_model.dec.parameters())
+        grad_norm_enc_q = grad_norm(g_model.enc_q.parameters())
+        grad_norm_flow = grad_norm(g_model.flow.parameters())
+        grad_norm_emb_g = grad_norm(g_model.emb_g.parameters())
+        optim_g.step()
 
         # Аккумуляция метрик
         acc_update_dict = {
@@ -628,7 +679,6 @@ def train_and_evaluate(
             "loss/avg/g": loss_gen,
             "loss/g/fm": loss_fm,
             "loss/g/mel": loss_mel,
-            "loss/g/kl": loss_kl,
             "loss/g/total": loss_gen_all,
             "grad/norm_d": grad_norm_d,
             "grad/norm_g": grad_norm_g,
@@ -636,14 +686,21 @@ def train_and_evaluate(
             "grad/norm_dec": grad_norm_dec,
             "grad/norm_enc_q": grad_norm_enc_q,
             "grad/norm_flow": grad_norm_flow,
+            "grad/norm_emb_g": grad_norm_emb_g,
             "eval/d_score_r": d_score_r,
             "eval/d_score_g": d_score_g,
         }
+        # Тег пишем только при включённом клиппинге: без него норма до обрезки
+        # равна grad/norm_d, и дублировать её в графиках незачем.
+        if grad_norm_d_pre is not None:
+            acc_update_dict["grad/norm_d_pre_clip"] = grad_norm_d_pre
         for name, fml in zip(disc_names, fm_per_disc):
             acc_update_dict[f"loss/g/fm_{name}"] = fml
         for i, ms in enumerate(mel_per_scale_scaled):
             acc_update_dict[f"loss/g/mel_scale_n{_MEL_SCALE_NAMES[i]}"] = ms
         acc.update(**acc_update_dict)
+        # KL нормируется на число валидных кадров, а не на батч
+        acc.update_weighted("loss/g/kl", loss_kl, z_mask.sum())
 
         if rank == 0:
             progress.set_postfix(
@@ -660,47 +717,60 @@ def train_and_evaluate(
 
         global_step += 1
 
+    epoch_seconds = ttime() - epoch_start
+
+    # Метрики должны описывать все данные, а не только шард rank 0.
+    # Коллективная операция: вызывать на всех ранках, не под if rank == 0.
+    if epoch % hps.train.log_interval == 0:
+        acc.reduce_across_ranks(device_id)
+
     if rank == 0 and epoch % hps.train.log_interval == 0:
         avg = acc.average()
 
-        spec, ids_slice, y_hat, pitchf = last_batch
-        mel = spec_to_mel_torch(
-            spec,
-            hps.data.filter_length,
-            hps.data.n_mel_channels,
-            hps.data.sample_rate,
-            hps.data.mel_fmin,
-            hps.data.mel_fmax,
-        )
-        segment_frames = hps.train.segment_size // hps.data.hop_length
-        y_mel = slice_segments(mel, ids_slice, segment_frames, dim=3)
-        y_hat_mel = mel_spectrogram_torch(
-            y_hat.float().squeeze(1),
-            hps.data.filter_length,
-            hps.data.n_mel_channels,
-            hps.data.sample_rate,
-            hps.data.hop_length,
-            hps.data.win_length,
-            hps.data.mel_fmin,
-            hps.data.mel_fmax,
-        )
-        mel_similarity = mel_spectrogram_similarity(y_hat_mel, y_mel)
-        f0_error = f0_error_cents(
-            y_hat,
-            pitchf,
-            ids_slice,
-            hps.data.sample_rate,
-            hps.data.hop_length,
-            segment_frames,
-        )
+        with torch.no_grad():
+            spec, ids_slice, y_hat, pitchf = last_batch
+            mel = spec_to_mel_torch(
+                spec,
+                hps.data.filter_length,
+                hps.data.n_mel_channels,
+                hps.data.sample_rate,
+                hps.data.mel_fmin,
+                hps.data.mel_fmax,
+            )
+            segment_frames = hps.train.segment_size // hps.data.hop_length
+            y_mel = slice_segments(mel, ids_slice, segment_frames, dim=3)
+            y_hat_mel = mel_spectrogram_torch(
+                y_hat.float().squeeze(1),
+                hps.data.filter_length,
+                hps.data.n_mel_channels,
+                hps.data.sample_rate,
+                hps.data.hop_length,
+                hps.data.win_length,
+                hps.data.mel_fmin,
+                hps.data.mel_fmax,
+            )
+            mel_similarity = mel_spectrogram_similarity(y_hat_mel, y_mel)
+            f0_mean, f0_median, f0_frames = f0_error_cents(
+                y_hat,
+                pitchf,
+                ids_slice,
+                hps.data.sample_rate,
+                hps.data.hop_length,
+                segment_frames,
+            )
 
         scalar_dict = {
             **avg,
             "eval/mel_sim": mel_similarity,
-            "eval/f0_error_cents": f0_error,
             "learning rate/G": optim_g.param_groups[0]["lr"],
             "learning rate/D": optim_d.param_groups[0]["lr"],
+            "time/epoch_sec": epoch_seconds,
         }
+        # Нет voiced-кадров — метрика не посчиталась: пишем пропуск, а не 2400
+        if f0_mean is not None:
+            scalar_dict["eval/f0_error_cents"] = f0_mean
+            scalar_dict["eval/f0_error_median"] = f0_median
+            scalar_dict["eval/f0_frames"] = f0_frames
         image_dict = {
             "mel/slice/real": plot_spectrogram_to_numpy(y_mel[0].data.cpu().numpy()),
             "mel/slice/fake": plot_spectrogram_to_numpy(
@@ -711,6 +781,13 @@ def train_and_evaluate(
             writer_eval.add_scalar(k, v, epoch)
         for k, v in image_dict.items():
             writer_eval.add_image(k, v, epoch, dataformats="HWC")
+        # Принудительный сброс на диск: иначе при остановке процесса
+        # теряется хвост до flush_secs (120 с) незаписанных событий.
+        writer_eval.flush()
+
+    # Обнуляем накопленное за интервал на всех ранках, не только на rank 0
+    if epoch % hps.train.log_interval == 0:
+        acc.reset()
 
     # Сохранение моделей
     if rank == 0:

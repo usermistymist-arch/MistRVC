@@ -150,8 +150,11 @@ def _format_scalar_lines(data, epochs_mode):
         steps = data[tag]
         if not steps:
             continue
-        precision = 10 if "learning rate" in tag.lower() else 6
-        fmt = f".{precision}f"
+        if tag.endswith("/f0_frames"):
+            fmt = ".0f"
+        else:
+            precision = 10 if "learning rate" in tag.lower() else 6
+            fmt = f".{precision}f"
         lines.append(f"\n{tag}:")
         for step in sorted(steps):
             lines.append(f"     [{unit} {step}] - {steps[step]:{fmt}}")
