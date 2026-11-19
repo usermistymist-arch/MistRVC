@@ -23,11 +23,35 @@ from assets.model_installer import (
 )
 from assets.pretrains import NO_PRETRAIN, default_pretrain, pretrain_choices
 from gradio_ui.jobs import command, request_stop, run_job
+from rvc.training.utils.probe import MODE_NAMES, locked_probe
 
 SAMPLE_RATES = [32000, 40000, 48000]
 DEFAULT_VOCODER = "HiFi-GAN"
 DEFAULT_GPUS = "0"
 DEFAULT_SEED = 1032003
+DEFAULT_PROBE = "fixed"
+PROBE_CHOICES = [
+    ("Случайный", "off"),
+    ("Обучающие данные", "fixed"),
+    ("Исключённые данные", "holdout"),
+]
+PROBE_INFO = (
+    "Сегменты датасета, по которым каждую эпоху замеряется качество. "
+    "Случайный: использует случайные сегменты каждую проверку, включая mute-файлы. "
+    "Нестабильные графики, датасет не уменьшается. "
+    "Обучающие данные: постоянный набор из данных для обучения, без mute-файлов. "
+    "Стабильные графики, датасет не уменьшается. "
+    "Исключённые данные: постоянный набор, исключённый из данных для обучения, "
+    "без mute-файлов. Стабильные графики, датасет уменьшается, но видно: "
+    "модель учится или запоминает датасет. Для датасетов от 40 сегментов, когда "
+    "часть данных не жалко отдать."
+)
+PROBE_SIZE_INFO = (
+    "Сколько сегментов датасета брать для проверок. "
+    "0 — авто: ~8% датасета, но не меньше 4 и не больше 24. "
+    "Больше сегментов — точнее замер, но в режиме "
+    "«Исключённые данные» столько же +2 соседних уходят из обучения."
+)
 F0_METHODS = ["rmvpe", "hpa-rmvpe"]
 AUDIO_EXTENSIONS = (
     ".wav",
@@ -277,6 +301,43 @@ def _seed_on_start(model_name, seed):
     )
 
 
+def _probe_state(model_name):
+    """Поля набора по имени модели: подставляет зафиксированные и блокирует."""
+    name = (model_name or "").strip()
+    locked = locked_probe(_exp_dir(name)) if name else None
+    if locked is None:
+        return (
+            gr.update(interactive=True, info=PROBE_INFO),
+            gr.update(interactive=True, info=PROBE_SIZE_INFO),
+        )
+    mode, size = locked
+    note = f"Набор модели «{name}» зафиксирован в data/probe.json — менять его нельзя."
+    return (
+        gr.update(value=mode, interactive=False, info=note),
+        gr.update(value=size, interactive=False, info=note),
+    )
+
+
+def _probe_on_start(model_name, probe, probe_size):
+    """Блокирует поля набора в момент нажатия кнопки, до конца обучения."""
+    name = (model_name or "").strip()
+    locked = locked_probe(_exp_dir(name)) if name else None
+    mode, size = locked if locked is not None else (probe, probe_size)
+    note = "Обучение запущено: проверочный набор зафиксирован."
+    return (
+        gr.update(value=mode, interactive=False, info=note),
+        gr.update(value=size if size is not None else 0, interactive=False, info=note),
+    )
+
+
+def _lock_on_start(model_name, seed, probe, probe_size):
+    """Один предшаг кнопки: блокирует сид и проверочный набор разом."""
+    return (
+        _seed_on_start(model_name, seed),
+        *_probe_on_start(model_name, probe, probe_size),
+    )
+
+
 def _url_pretrain_path(kind: str, url: str) -> str:
     """Локальное имя для претрейна из URL: имя файла + хеш ссылки.
 
@@ -383,6 +444,8 @@ def _train_model(
     d_label_smoothing,
     seed,
     deterministic,
+    probe,
+    probe_size,
 ):
     model_name = _require_name(model_name)
     logs_dir = _require_logs_dir()
@@ -399,11 +462,23 @@ def _train_model(
         # Сид посреди тренировки менять нельзя: запуск не прерываем, а
         # принудительно продолжаем с зафиксированным сидом и предупреждаем.
         seed_note = (
-            f"⚠️ Сид модели «{model_name}» зафиксирован: {locked_seed}. "
+            f"Сид модели «{model_name}» зафиксирован: {locked_seed}. "
             f"Передан {int(seed)} — менять сид посреди тренировки нельзя. "
             f"Обучение принудительно продолжится с сидом {locked_seed}. "
             "Для другого сида создайте новую модель."
         )
+    locked_set = locked_probe(exp_dir)
+    probe_note = ""
+    if locked_set is not None:
+        saved_mode, saved_size = locked_set
+        if probe != saved_mode or int(probe_size or 0) not in (0, saved_size):
+            probe_note = (
+                f"Проверочный набор модели «{model_name}» зафиксирован: "
+                f"«{MODE_NAMES.get(saved_mode, saved_mode)}», {saved_size} сегм. "
+                "Менять его посреди тренировки нельзя — "
+                "обучение принудительно продолжится с прежним набором."
+            )
+        probe, probe_size = saved_mode, saved_size
     cmd = command(
         "rvc.training.train",
         "--experiment_dir",
@@ -437,10 +512,11 @@ def _train_model(
         cmd += ["--seed", str(int(seed) if seed is not None else DEFAULT_SEED)]
     if deterministic:
         cmd.append("--deterministic")
+    cmd += ["--probe", str(probe), "--probe_size", str(int(probe_size or 0))]
 
     notes, (resolved_g, resolved_d) = yield from _drain(
         _prefixed(
-            seed_note,
+            "\n".join(part for part in (seed_note, probe_note) if part),
             _resolve_pretrains(
                 pretrain, pretrain_g, pretrain_d, vocoder, int(sample_rate), exp_dir
             ),
@@ -555,20 +631,36 @@ def training_tab():
                     info="Цели D: real = 1-s, fake = s - D менее самоуверен. 0.0 = выкл.",
                 )
         with gr.Accordion("Воспроизводимость", open=False):
-            with gr.Row(equal_height=True):
-                seed = gr.Number(
-                    value=DEFAULT_SEED,
-                    precision=0,
-                    minimum=0,
-                    maximum=2**31 - 1,
-                    label="Сид обучения",
-                    info="Зерно случайности: инициализация emb_g, случайные срезы и шум, порядок батчей.",
-                )
-                deterministic = gr.Checkbox(
-                    value=False,
-                    label="Детерминировать обучение",
-                    info="Повторяемость прогонов при одинаковом сиде. Обучение будет медленнее.",
-                )
+            with gr.Group():
+                with gr.Row(equal_height=True):
+                    seed = gr.Number(
+                        value=DEFAULT_SEED,
+                        precision=0,
+                        minimum=0,
+                        maximum=2**31 - 1,
+                        label="Сид обучения",
+                        info="Зерно случайности: инициализация emb_g, случайные срезы и шум, порядок батчей.",
+                    )
+                    deterministic = gr.Checkbox(
+                        value=False,
+                        label="Детерминировать обучение",
+                        info="Повторяемость прогонов при одинаковом сиде. Обучение будет медленнее.",
+                    )
+                with gr.Row(equal_height=True):
+                    probe = gr.Dropdown(
+                        PROBE_CHOICES,
+                        value=DEFAULT_PROBE,
+                        label="Проверочный набор",
+                        info=PROBE_INFO,
+                    )
+                    probe_size = gr.Number(
+                        value=0,
+                        precision=0,
+                        minimum=0,
+                        maximum=24,
+                        label="Сегментов в наборе",
+                        info=PROBE_SIZE_INFO,
+                    )
         with gr.Row(equal_height=True):
             train_btn = gr.Button("Запустить обучение", variant="primary")
             stop_btn = gr.Button("Завершить процесс", variant="stop")
@@ -582,6 +674,9 @@ def training_tab():
         _step_states, inputs=model_name, outputs=step_buttons, api_name=False
     )
     model_name.change(_seed_state, inputs=model_name, outputs=seed, api_name=False)
+    model_name.change(
+        _probe_state, inputs=model_name, outputs=[probe, probe_size], api_name=False
+    )
     # Список претрейнов зависит от частоты.
     sample_rate.change(
         _refresh_pretrains,
@@ -607,9 +702,9 @@ def training_tab():
         outputs=log,
     ).then(_step_states, inputs=model_name, outputs=step_buttons, api_name=False)
     train_btn.click(
-        _seed_on_start,
-        inputs=[model_name, seed],
-        outputs=seed,
+        _lock_on_start,
+        inputs=[model_name, seed, probe, probe_size],
+        outputs=[seed, probe, probe_size],
         queue=False,
         api_name=False,
     ).then(
@@ -630,14 +725,15 @@ def training_tab():
             d_label_smoothing,
             seed,
             deterministic,
+            probe,
+            probe_size,
         ],
         outputs=log,
         queue=True,
-    ).then(_seed_state, inputs=model_name, outputs=seed, api_name=False)
-    index_btn.click(_train_index, inputs=model_name, outputs=log).then(
-        _step_states,
+    ).then(_seed_state, inputs=model_name, outputs=seed, api_name=False).then(
+        _probe_state,
         inputs=model_name,
-        outputs=step_buttons,
+        outputs=[probe, probe_size],
         api_name=False,
     )
     stop_btn.click(request_stop, outputs=stop_status, queue=False, api_name=False)

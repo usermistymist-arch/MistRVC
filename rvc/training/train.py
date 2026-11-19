@@ -76,6 +76,7 @@ from rvc.training.utils.data_utils import (
     TextAudioCollateMultiNSFsid,
     TextAudioLoaderMultiNSFsid,
 )
+from rvc.training.utils.probe import setup_probe
 from rvc.training.utils.train_utils import (
     HParams,
     extract_model,
@@ -83,6 +84,7 @@ from rvc.training.utils.train_utils import (
     save_checkpoint,
 )
 from rvc.training.visualization import (
+    f0_cents_errors,
     f0_error_cents,
     mel_spectrogram_similarity,
     plot_spectrogram_to_numpy,
@@ -141,6 +143,10 @@ def get_hparams():
     parser.add_argument("--d_label_smoothing", type=float, default=0.0)
     parser.add_argument("--seed", type=int, default=None)
     parser.add_argument("--deterministic", action="store_true")
+    parser.add_argument(
+        "--probe", type=str, choices=["off", "fixed", "holdout"], default="fixed"
+    )
+    parser.add_argument("--probe_size", type=int, default=0)
     args = parser.parse_args()
     if args.seed is not None and not 0 <= args.seed <= 2**32 - 1:
         parser.error("--seed должен быть целым числом от 0 до 4294967295")
@@ -207,7 +213,14 @@ def get_hparams():
     hparams.deterministic = args.deterministic
     if args.deterministic:
         os.environ["CUBLAS_WORKSPACE_CONFIG"] = ":4096:8"
-    hparams.data.training_files = f"{experiment_dir}/data/filelist.txt"
+    train_files, eval_files, probe_note = setup_probe(
+        experiment_dir,
+        mode=args.probe,
+        size=args.probe_size,
+        batch_size=args.batch_size,
+    )
+    hparams.data.training_files = train_files
+    hparams.data.eval_files = eval_files
 
     print(" \n\nПАРАМЕТРЫ ОБУЧЕНИЯ ")
     print("=" * 70)
@@ -236,6 +249,7 @@ def get_hparams():
         f"{'Детерминированное обучение:':<30} "
         f"{'Да' if hparams.deterministic else 'Нет'}"
     )
+    print(f"{'Проверочный набор:':<30} {probe_note}")
     print("=" * 70 + "\n")
     return hparams
 
@@ -406,6 +420,16 @@ def run(hps, rank, n_gpus, device, device_id):
             prefetch_factor=8,
         )
 
+        eval_batches = None
+        if rank == 0 and hps.data.eval_files:
+            eval_hps = HParams(**dict(hps.data.items()))
+            eval_hps.training_files = hps.data.eval_files
+            eval_dataset = TextAudioLoaderMultiNSFsid(eval_hps)
+            if len(eval_dataset) > 0:
+                eval_batches = [
+                    collate_fn([eval_dataset[i]]) for i in range(len(eval_dataset))
+                ]
+
         net_g = Synthesizer(
             hps.data.filter_length // 2 + 1,
             hps.train.segment_size // hps.data.hop_length,
@@ -555,6 +579,7 @@ def run(hps, rank, n_gpus, device, device_id):
                 device,
                 device_id,
                 metrics_acc,
+                eval_batches,
             )
             scheduler_g.step()
             scheduler_d.step()
@@ -583,6 +608,104 @@ _MEL_SCALE_GROUPS = {
     "320": "fine",
     "480": "fine",
 }
+# Зерно проверочного набора: константа, чтобы замер был одинаковым каждую эпоху
+_PROBE_SEED = 0
+
+
+def evaluate_probe(hps, net_g, eval_batches, device, device_id):
+    """Метрики на фиксированном проверочном наборе.
+
+    Набор неизменен и без мьютов, сегмент считается целиком (а не случайные
+    36 кадров). Батчи заранее загружены в RAM (см. run()), с диска здесь
+    ничего не читается. RNG форкается и сеется константой: шум генератора
+    одинаков каждую эпоху, а поток случайности обучения не сдвигается.
+    """
+    g_model = net_g.module if hasattr(net_g, "module") else net_g
+    was_training = g_model.training
+    was_randomized = g_model.randomized
+    g_model.eval()
+    g_model.randomized = False
+
+    l1_sum, l1_num = 0.0, 0
+    f0_parts = []
+    first_mels = None
+    rng_devices = [device_id] if device.type == "cuda" else []
+    try:
+        with torch.no_grad(), torch.random.fork_rng(devices=rng_devices):
+            torch.manual_seed(_PROBE_SEED)
+            for info in eval_batches:
+                if device.type == "cuda":
+                    info = [t.cuda(device_id, non_blocking=True) for t in info]
+                else:
+                    info = [t.to(device) for t in info]
+                (
+                    phone,
+                    phone_lengths,
+                    pitch,
+                    pitchf,
+                    spec,
+                    spec_lengths,
+                    _,
+                    _,
+                    sid,
+                ) = info
+                y_hat = g_model(
+                    phone, phone_lengths, pitch, pitchf, spec, spec_lengths, sid
+                )[0]
+                real_mel = spec_to_mel_torch(
+                    spec,
+                    hps.data.filter_length,
+                    hps.data.n_mel_channels,
+                    hps.data.sample_rate,
+                    hps.data.mel_fmin,
+                    hps.data.mel_fmax,
+                )
+                fake_mel = mel_spectrogram_torch(
+                    y_hat.float().squeeze(1),
+                    hps.data.filter_length,
+                    hps.data.n_mel_channels,
+                    hps.data.sample_rate,
+                    hps.data.hop_length,
+                    hps.data.win_length,
+                    hps.data.mel_fmin,
+                    hps.data.mel_fmax,
+                )
+                frames = min(real_mel.size(-1), fake_mel.size(-1))
+                real_mel = real_mel[..., :frames]
+                fake_mel = fake_mel[..., :frames]
+                l1_sum += (fake_mel - real_mel).abs().sum().item()
+                l1_num += real_mel.numel()
+                errors = f0_cents_errors(
+                    y_hat,
+                    pitchf,
+                    torch.zeros_like(spec_lengths),
+                    hps.data.sample_rate,
+                    hps.data.hop_length,
+                    frames,
+                )
+                if errors is not None:
+                    f0_parts.append(errors)
+                if first_mels is None:
+                    first_mels = (real_mel[0].cpu().numpy(), fake_mel[0].cpu().numpy())
+    finally:
+        g_model.randomized = was_randomized
+        if was_training:
+            g_model.train()
+
+    scalars, images = {}, {}
+    if l1_num:
+        scalars["eval/probe_mel_sim"] = max(
+            0.0, min(100.0, 100.0 - 100.0 * l1_sum / l1_num)
+        )
+    if f0_parts:
+        errors = torch.cat(f0_parts)
+        scalars["eval/probe_f0_cents"] = errors.mean().item()
+        scalars["eval/probe_f0_median"] = errors.median().item()
+        scalars["eval/probe_f0_frames"] = int(errors.numel())
+    if first_mels is not None:
+        images["mel/probe/real"] = plot_spectrogram_to_numpy(first_mels[0])
+        images["mel/probe/fake"] = plot_spectrogram_to_numpy(first_mels[1])
+    return scalars, images
 
 
 def train_and_evaluate(
@@ -597,6 +720,7 @@ def train_and_evaluate(
     device,
     device_id,
     acc,
+    eval_batches,
 ):
     global global_step
 
@@ -748,57 +872,69 @@ def train_and_evaluate(
 
     if rank == 0 and epoch % hps.train.log_interval == 0:
         avg = acc.average()
-
-        with torch.no_grad():
-            spec, ids_slice, y_hat, pitchf = last_batch
-            mel = spec_to_mel_torch(
-                spec,
-                hps.data.filter_length,
-                hps.data.n_mel_channels,
-                hps.data.sample_rate,
-                hps.data.mel_fmin,
-                hps.data.mel_fmax,
-            )
-            segment_frames = hps.train.segment_size // hps.data.hop_length
-            y_mel = slice_segments(mel, ids_slice, segment_frames, dim=3)
-            y_hat_mel = mel_spectrogram_torch(
-                y_hat.float().squeeze(1),
-                hps.data.filter_length,
-                hps.data.n_mel_channels,
-                hps.data.sample_rate,
-                hps.data.hop_length,
-                hps.data.win_length,
-                hps.data.mel_fmin,
-                hps.data.mel_fmax,
-            )
-            mel_similarity = mel_spectrogram_similarity(y_hat_mel, y_mel)
-            f0_mean, f0_median, f0_frames = f0_error_cents(
-                y_hat,
-                pitchf,
-                ids_slice,
-                hps.data.sample_rate,
-                hps.data.hop_length,
-                segment_frames,
-            )
-
         scalar_dict = {
             **avg,
-            "eval/mel_sim": mel_similarity,
             "learning rate/G": optim_g.param_groups[0]["lr"],
             "learning rate/D": optim_d.param_groups[0]["lr"],
             "time/epoch_sec": epoch_seconds,
         }
-        # Нет voiced-кадров — метрика не посчиталась: пишем пропуск, а не 2400
-        if f0_mean is not None:
-            scalar_dict["eval/f0_error_cents"] = f0_mean
-            scalar_dict["eval/f0_error_median"] = f0_median
-            scalar_dict["eval/f0_frames"] = f0_frames
-        image_dict = {
-            "mel/slice/real": plot_spectrogram_to_numpy(y_mel[0].data.cpu().numpy()),
-            "mel/slice/fake": plot_spectrogram_to_numpy(
+        image_dict = {}
+        if eval_batches is not None:
+            probe_start = ttime()
+            probe_scalars, probe_images = evaluate_probe(
+                hps, net_g, eval_batches, device, device_id
+            )
+            scalar_dict["time/probe_sec"] = ttime() - probe_start
+            scalar_dict.update(probe_scalars)
+            image_dict.update(probe_images)
+        elif last_batch is not None:
+            # Режим «Случайный»: набора нет, замеряем последний батч эпохи.
+            # Метрики шумные (в батч попадают мьюты), но иначе в этом режиме
+            # не будет вообще никакой оценки качества.
+            with torch.no_grad():
+                spec, ids_slice, y_hat, pitchf = last_batch
+                mel = spec_to_mel_torch(
+                    spec,
+                    hps.data.filter_length,
+                    hps.data.n_mel_channels,
+                    hps.data.sample_rate,
+                    hps.data.mel_fmin,
+                    hps.data.mel_fmax,
+                )
+                segment_frames = hps.train.segment_size // hps.data.hop_length
+                y_mel = slice_segments(mel, ids_slice, segment_frames, dim=3)
+                y_hat_mel = mel_spectrogram_torch(
+                    y_hat.float().squeeze(1),
+                    hps.data.filter_length,
+                    hps.data.n_mel_channels,
+                    hps.data.sample_rate,
+                    hps.data.hop_length,
+                    hps.data.win_length,
+                    hps.data.mel_fmin,
+                    hps.data.mel_fmax,
+                )
+                scalar_dict["eval/mel_sim"] = mel_spectrogram_similarity(
+                    y_hat_mel, y_mel
+                )
+                f0_mean, f0_median, f0_frames = f0_error_cents(
+                    y_hat,
+                    pitchf,
+                    ids_slice,
+                    hps.data.sample_rate,
+                    hps.data.hop_length,
+                    segment_frames,
+                )
+            # Нет voiced-кадров — метрика не посчиталась: пишем пропуск, а не 2400
+            if f0_mean is not None:
+                scalar_dict["eval/f0_error_cents"] = f0_mean
+                scalar_dict["eval/f0_error_median"] = f0_median
+                scalar_dict["eval/f0_frames"] = f0_frames
+            image_dict["mel/slice/real"] = plot_spectrogram_to_numpy(
+                y_mel[0].data.cpu().numpy()
+            )
+            image_dict["mel/slice/fake"] = plot_spectrogram_to_numpy(
                 y_hat_mel[0].data.cpu().numpy()
-            ),
-        }
+            )
         for k, v in scalar_dict.items():
             writer_eval.add_scalar(k, v, epoch)
         for k, v in image_dict.items():

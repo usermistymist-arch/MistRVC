@@ -124,17 +124,8 @@ def _slice_pitch(pitchf, ids_slice, segment_frames, device):
     return torch.cat(target_slices, dim=0).squeeze(1).to(device).float()
 
 
-def f0_error_cents(y_hat, pitchf, ids_slice, sample_rate, hop_length, segment_frames):
-    """Ошибка F0 в центах: (среднее, медиана, число кадров).
-
-    Меньше = лучше. 100 cents = 1 полутон. Считается только на voiced кадрах,
-    где и y_hat, и target pitchf имеют ненулевой F0.
-
-    Медиана устойчива к единичным октавным промахам: если среднее заметно
-    больше медианы, метрику тянут выбросы, а не общий строй. Число кадров
-    показывает вес цифры. Если сравнивать нечего (батч из мьютов), вместо
-    заглушки возвращаем None — в графике будет пропуск, а не «катастрофа».
-    """
+def f0_cents_errors(y_hat, pitchf, ids_slice, sample_rate, hop_length, segment_frames):
+    """Ошибки F0 в центах по voiced-кадрам: 1D тензор или None, если их нет."""
     fake_f0 = _estimate_f0_autocorr(y_hat, sample_rate, hop_length)
     target_f0 = _slice_pitch(pitchf, ids_slice, segment_frames, fake_f0.device)
 
@@ -143,9 +134,8 @@ def f0_error_cents(y_hat, pitchf, ids_slice, sample_rate, hop_length, segment_fr
     target_f0 = target_f0[..., :frames]
 
     voiced_mask = (fake_f0 > 0.0) & (target_f0 > 0.0)
-    count = int(voiced_mask.sum())
-    if count == 0:
-        return None, None, 0
+    if not bool(voiced_mask.any()):
+        return None
 
     cents_error = 1200.0 * torch.abs(
         torch.log2(
@@ -153,5 +143,22 @@ def f0_error_cents(y_hat, pitchf, ids_slice, sample_rate, hop_length, segment_fr
             / target_f0[voiced_mask].clamp_min(1e-5)
         ),
     )
-    cents_error = cents_error.clamp(max=2400.0)
-    return cents_error.mean(), cents_error.median(), count
+    return cents_error.clamp(max=2400.0)
+
+
+def f0_error_cents(y_hat, pitchf, ids_slice, sample_rate, hop_length, segment_frames):
+    """Ошибка F0 в центах: (среднее, медиана, число кадров).
+
+    Меньше = лучше. 100 cents = 1 полутон. Считается только на voiced кадрах,
+    где и y_hat, и target pitchf имеют ненулевой F0.
+
+    Медиана устойчива к единичным октавным промахам: если среднее заметно
+    больше медианы, метрику тянут выбросы, а не общий строй. Если сравнивать
+    нечего, возвращаем None — в графике будет пропуск, а не «катастрофа».
+    """
+    errors = f0_cents_errors(
+        y_hat, pitchf, ids_slice, sample_rate, hop_length, segment_frames
+    )
+    if errors is None:
+        return None, None, 0
+    return errors.mean(), errors.median(), int(errors.numel())
