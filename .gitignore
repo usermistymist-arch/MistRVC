@@ -33,6 +33,7 @@ venv/
 *.log
 *.txt
 !requirements.txt
+!METRICS_GUIDE.txt
 *.ipynb_checkpoints
 **/.ipynb_checkpoints/
 .DS_Store
