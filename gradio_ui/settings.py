@@ -63,13 +63,13 @@ def update_filename_template(template: str):
     os.makedirs(SETTINGS_DIR, exist_ok=True)
     with open(SETTINGS_FILE, "w", encoding="utf-8") as f:
         json.dump(settings, f, ensure_ascii=False, indent=2)
-    return f"✅ Шаблон сохранён: '{template}'"
+    return f"Шаблон сохранён: '{template}'"
 
 
 def apply_theme(color):
     """Сохраняет цвет и возвращает сообщение о статусе."""
     save_theme_color(color)
-    return f"✅ Цвет темы сохранён: '{color}'. Перезапустите интерфейс для применения."
+    return f"Цвет темы сохранён: '{color}'. Перезапустите интерфейс для применения."
 
 
 def settings_tab():
@@ -79,7 +79,7 @@ def settings_tab():
 
     with gr.Row():
         with gr.Column(scale=1):
-            gr.Markdown("### 🎨 Цвет интерфейса")
+            gr.Markdown("### Цвет интерфейса")
             gr.Markdown(
                 "Изменения вступят в силу после перезапуска интерфейса (ячейки кода в Google Colab)."
             )

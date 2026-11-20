@@ -147,7 +147,7 @@ def run_job(title: str, commands: list, prefix: str = ""):
         _stop_requested = False
 
     lines = deque(maxlen=TAIL_LINES)
-    lines.append(f"▶ {title}")
+    lines.append(f"> {title}")
     if prefix:
         lines.extend(prefix.split("\n"))
     yield "\n".join(lines)
@@ -177,7 +177,7 @@ def run_job(title: str, commands: list, prefix: str = ""):
                             # Jupyter/Colab не перерисовывает \r в консольной выдаче:
                             # там печатаем завершённый tqdm-бар один раз, по LF.
                             # В обычном TTY построчно завершаем уже обновляемый бар.
-                            console_text = live or text
+                            console_text = text or live
                             if console_text:
                                 lines.append(console_text)
                                 if live and sys.stdout.isatty():
@@ -215,12 +215,12 @@ def run_job(title: str, commands: list, prefix: str = ""):
             with _lock:
                 stopped = _stop_requested
             if stopped:
-                lines.append("⏹ Остановлено пользователем.")
+                lines.append("[!] Остановлено пользователем.")
                 yield "\n".join(lines)
                 return
             if proc.returncode != 0:
                 lines.append(
-                    f"❌ Ошибка (код {proc.returncode}). Смотрите журнал выше."
+                    f"[X] Ошибка (код {proc.returncode}). Смотрите журнал выше."
                 )
                 yield "\n".join(lines)
                 return
@@ -230,5 +230,5 @@ def run_job(title: str, commands: list, prefix: str = ""):
             _process = None
             _process_group_id = None
 
-    lines.append("✓ Готово.")
+    lines.append("Готово.")
     yield "\n".join(lines)

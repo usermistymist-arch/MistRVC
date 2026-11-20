@@ -113,9 +113,14 @@ def get_vc(model_path):
     # Извлекаем параметры модели
     tgt_sr = cpt["config"][-1]
     vocoder = cpt.get("vocoder", "HiFi-GAN")
+    if vocoder != "HiFi-GAN":
+        raise ValueError(
+            f"Модель '{model_name}' обучена с вокодером '{vocoder}'. "
+            "MistRVC поддерживает только HiFi-GAN."
+        )
 
-    # Инициализируем синтезатор
-    net_g = Synthesizer(*cpt["config"], text_enc_hidden_dim=768, vocoder=vocoder)
+    # Инициализируем синтезатор (единственная архитектура — HiFi-GAN NSF)
+    net_g = Synthesizer(*cpt["config"], text_enc_hidden_dim=768)
 
     # Удаляем ненужный слой
     del net_g.enc_q

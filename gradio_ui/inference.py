@@ -380,7 +380,7 @@ def _conversion_settings_tab():
     )
 
     with gr.Column():
-        gr.Markdown("### 📁 Именование файлов")
+        gr.Markdown("### Именование файлов")
         gr.Markdown(
             "Шаблон имени выходного файла при конвертации. Доступные ключи: "
             "`{PITCH_SHIFT}`, `{NAME}`, `{MODEL}`, `{SPEAKER}`. "

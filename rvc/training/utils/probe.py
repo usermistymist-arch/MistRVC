@@ -4,6 +4,9 @@
 Мьюты в зонд не берутся никогда: тишина воспроизводится почти идеально и
 завышает метрики. Соседние окна нарезки перекрываются на 0.3 с, поэтому
 в зонд берётся сплошной блок, а соседи блока при изъятии тоже уходят.
+
+data/meta.json — общие служебные настройки модели: кроме набора там лежит
+секция "dataset" со сведениями о датасете, снятыми при нарезке.
 """
 
 import hashlib
@@ -12,7 +15,7 @@ import os
 import re
 
 MODES = ("off", "fixed", "holdout")
-# Имена для журнала; в CLI и probe.json остаются коды режимов.
+# Имена для журнала; в CLI и meta.json остаются коды режимов.
 MODE_NAMES = {
     "off": "Случайный",
     "fixed": "Обучающие данные",
@@ -22,6 +25,7 @@ _SHARE = 0.08
 _MIN_PROBE = 4
 _MAX_PROBE = 24
 _MIN_SEGMENTS = 40
+_META_NAME = "meta.json"
 
 
 def _wav(line):
@@ -72,20 +76,78 @@ def _digest(lines):
     return hashlib.sha256("\n".join(lines).encode("utf-8")).hexdigest()[:16]
 
 
+def _meta_path(exp_dir):
+    """Путь к служебному файлу модели (data/meta.json)."""
+    return os.path.join(exp_dir, "data", _META_NAME)
+
+
+def read_meta(exp_dir):
+    """Служебные настройки модели; пустой словарь, если файла нет или он битый."""
+    path = _meta_path(exp_dir)
+    if not os.path.isfile(path):
+        return {}
+    try:
+        with open(path, encoding="utf-8") as file:
+            data = json.load(file)
+    except (OSError, ValueError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def update_meta(exp_dir, **fields):
+    """Дописывает поля в служебный файл, сохраняя остальные.
+
+    Файл общий: нарезка пишет сюда сведения о датасете, обучение — набор.
+    Запись целиком затёрла бы чужую секцию.
+    """
+    data = read_meta(exp_dir)
+    data.update(fields)
+    path = _meta_path(exp_dir)
+    try:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w", encoding="utf-8") as file:
+            json.dump(data, file, ensure_ascii=False, indent=2)
+    except OSError as error:
+        print(f"[!] Не удалось записать {path}: {error}", flush=True)
+
+
+def save_dataset_info(exp_dir, total_sec, segment_sec, files=0):
+    """Сведения о датасете, снятые до нарезки: длительность и длина сегмента."""
+    update_meta(
+        exp_dir,
+        dataset={
+            "total_sec": round(float(total_sec), 3),
+            "segment_sec": round(float(segment_sec), 3),
+            "files": int(files),
+        },
+    )
+
+
+def dataset_info(exp_dir):
+    """(длительность датасета, длина сегмента) в секундах или (None, None)."""
+    info = read_meta(exp_dir).get("dataset") or {}
+    try:
+        return float(info["total_sec"]), float(info["segment_sec"])
+    except (KeyError, TypeError, ValueError):
+        return None, None
+
+
 def locked_probe(exp_dir):
     """Зафиксированный набор модели: (режим, число сегментов) или None.
 
-    None — набор ещё можно выбрать: probe.json нет либо filelist.txt
+    None — набор ещё можно выбрать: meta.json нет либо filelist.txt
     изменился, и при следующем запуске набор будет пересобран.
     """
     data_dir = os.path.join(exp_dir, "data")
-    probe_path = os.path.join(data_dir, "probe.json")
+    probe_path = _meta_path(exp_dir)
     filelist = os.path.join(data_dir, "filelist.txt")
     if not os.path.isfile(probe_path) or not os.path.isfile(filelist):
         return None
     try:
         with open(probe_path, encoding="utf-8") as file:
             saved = json.load(file)
+        if not isinstance(saved, dict):
+            return None
         with open(filelist, encoding="utf-8") as file:
             lines = [line.strip() for line in file if line.strip()]
         if saved.get("filelist") != _digest(lines):
@@ -101,21 +163,14 @@ def locked_probe(exp_dir):
 def setup_probe(exp_dir, mode="fixed", size=0, batch_size=16):
     """Готовит зонд и списки; возвращает (train-список, eval-список или None, описание).
 
-    Выбор сохраняется в data/probe.json и переиспользуется при продолжении
+    Выбор сохраняется в data/meta.json и переиспользуется при продолжении
     обучения: менять зонд посреди пути нельзя, как и сид.
     """
     data_dir = os.path.join(exp_dir, "data")
     filelist = os.path.join(data_dir, "filelist.txt")
     if mode == "off":
-        probe_path = os.path.join(data_dir, "probe.json")
-        saved_mode = None
-        if os.path.isfile(probe_path):
-            try:
-                with open(probe_path, encoding="utf-8") as file:
-                    saved_mode = json.load(file).get("mode")
-            except (OSError, ValueError):
-                saved_mode = None
-        if saved_mode != "holdout":
+        locked = locked_probe(exp_dir)
+        if locked is None or locked[0] != "holdout":
             return filelist, None, MODE_NAMES["off"]
         # Изъятые сегменты нельзя вернуть в обучение посреди пути
         print(
@@ -134,7 +189,7 @@ def setup_probe(exp_dir, mode="fixed", size=0, batch_size=16):
         return filelist, None, "случайный (нет сегментов)"
 
     digest = _digest(lines)
-    probe_path = os.path.join(data_dir, "probe.json")
+    probe_path = _meta_path(exp_dir)
     saved = None
     if os.path.isfile(probe_path):
         try:
@@ -183,19 +238,14 @@ def setup_probe(exp_dir, mode="fixed", size=0, batch_size=16):
                 mode = "fixed"
         eval_wavs = {_wav(line) for line in chosen}
         margin_wavs = {_wav(line) for line in margin}
-        with open(probe_path, "w", encoding="utf-8") as file:
-            json.dump(
-                {
-                    "filelist": digest,
-                    "mode": mode,
-                    "size": len(eval_wavs),
-                    "eval": sorted(eval_wavs),
-                    "margin": sorted(margin_wavs),
-                },
-                file,
-                ensure_ascii=False,
-                indent=2,
-            )
+        update_meta(
+            exp_dir,
+            filelist=digest,
+            mode=mode,
+            size=len(eval_wavs),
+            eval=sorted(eval_wavs),
+            margin=sorted(margin_wavs),
+        )
 
     removed = (eval_wavs | margin_wavs) if mode == "holdout" else set()
     train_lines = [line for line in lines if _wav(line) not in removed]

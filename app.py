@@ -70,7 +70,7 @@ def check_uvr() -> tuple[str, str, str, Any]:
         return "UVR", "", "", uvr_tab
     except Exception:
         return (
-            "UVR ⚠️",
+            "UVR (!)",
             "UVR недоступен: не установлен PolUVR или его зависимости.",
             traceback.format_exc(),
             None,
@@ -172,7 +172,7 @@ if __name__ == "__main__":
     print(f"╚{'═' * 42}╝\n")
 
     if uvr_ui is None:
-        print("⚠️ [UVR] Импорт не удался, вкладка UVR будет отключена!")
+        print("[!] UVR: импорт не удался, вкладка UVR будет отключена!")
 
     print("Запуск интерфейса MistRVC. Подождите...")
     if is_offline_mode():

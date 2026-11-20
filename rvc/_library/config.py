@@ -43,7 +43,7 @@ class Config:
         return (1, 6, 38, 41)
 
 
-def generate_config(config_save_path, sample_rate, vocoder):
+def generate_config(config_save_path, sample_rate):
     config_path = os.path.join("rvc", "training", "configs", f"{sample_rate}.json")
     if not pathlib.Path(config_save_path).exists():
         with (
@@ -51,5 +51,4 @@ def generate_config(config_save_path, sample_rate, vocoder):
             open(config_path, encoding="utf-8") as config_file,
         ):
             config_data = json.load(config_file)
-            config_data["model"]["vocoder"] = vocoder
             json.dump(config_data, f, ensure_ascii=False, indent=2)

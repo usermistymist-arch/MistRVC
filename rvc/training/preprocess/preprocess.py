@@ -16,8 +16,9 @@ sys.path.append(
 )
 import re
 
-from rvc._library.audio import load_audio
+from rvc._library.audio import audio_duration, load_audio
 from rvc.training.preprocess.slicer import Slicer
+from rvc.training.utils.probe import save_dataset_info
 
 
 def natural_sort_key(s):
@@ -63,6 +64,37 @@ def is_audio_file(path):
     )
 
 
+def dataset_audio_files(input_root):
+    """Файлы, которые получит нарезка: подпапки-спикеры или сама папка.
+
+    Повторяет выбор ветки в PreProcess.pipeline_inp_dir — длительность
+    считается ровно по тем файлам, которые пойдут в нарезку.
+    """
+    subdirs = sorted(
+        (
+            d
+            for d in os.listdir(input_root)
+            if os.path.isdir(os.path.join(input_root, d))
+        ),
+        key=natural_sort_key,
+    )
+    speakers = [
+        d
+        for d in subdirs
+        if any(
+            is_audio_file(os.path.join(input_root, d, f))
+            for f in os.listdir(os.path.join(input_root, d))
+        )
+    ]
+    roots = [os.path.join(input_root, d) for d in speakers] or [input_root]
+    return [
+        os.path.join(root, name)
+        for root in roots
+        for name in sorted(os.listdir(root))
+        if is_audio_file(os.path.join(root, name))
+    ]
+
+
 class Postfix:
     # tqdm сам подставляет ", " перед постфиксом — этот класс обходит это,
     # чтобы строка выглядела как "4/4 [сегментов: 922]", а не "4/4, сегментов: 922"
@@ -75,6 +107,7 @@ class Postfix:
 
 class PreProcess:
     def __init__(self, sample_rate, exp_dir, percentage=3.0, normalize=True):
+        self.exp_dir = exp_dir
         # Директория для сохранения обработанных аудиофайлов
         self.gt_wavs_dir = os.path.join(exp_dir, "data", "sliced_audios")
         # 16 кГц-копии сегментов: F0 и HuBERT читают их напрямую без ресемпла
@@ -138,8 +171,21 @@ class PreProcess:
         )
         return 1  # Сегмент записан
 
+    def _record_dataset(self, input_root):
+        """Считает длительность датасета до нарезки и пишет её в служебный файл."""
+        paths = dataset_audio_files(input_root)
+        if not paths:
+            return
+        total_sec = sum(audio_duration(path) for path in paths)
+        save_dataset_info(self.exp_dir, total_sec, self.percentage, files=len(paths))
+        print(
+            f"Длина датасета: {total_sec / 60:.1f} мин ({len(paths)} файлов); "
+            f"Длина сегмента: {self.percentage:.1f} сек"
+        )
+
     def pipeline_inp_dir(self, input_root):
         try:
+            self._record_dataset(input_root)
             # Проверяем, есть ли подпапки с аудиофайлами
             subdirs = [
                 d

@@ -149,7 +149,7 @@ def extract_model(hps, ckpt, epoch, step, filepath, half=True):
         opt["sr"] = hps.data.sample_rate
         opt["f0"] = True
         opt["version"] = "v2"
-        opt["vocoder"] = hps.model.vocoder
+        opt["vocoder"] = "HiFi-GAN"
 
         # Дополнительные метаданные
         opt["learning_environment"] = "MuXVS"

@@ -6,11 +6,9 @@ from tqdm import tqdm
 
 from assets.pretrains import BASE_URL as PRETRAINS_BASE_URL
 from assets.pretrains import (
-    NO_PRETRAIN,
-    has_pretrains,
+    PRETRAINS,
     pretrain_files,
     pretrain_rates,
-    pretrain_sets,
     rate_label,
 )
 
@@ -103,27 +101,21 @@ def download_with_progress(url, path):
                     last_shown = percent
                     yield f"  ⬇ {os.path.basename(path)}: {percent}% ({done // 1024 // 1024}/{total // 1024 // 1024} МБ)"
     os.replace(tmp_path, path)
-    yield f"  ✓ {os.path.basename(path)} ({done // 1024 // 1024} МБ)"
+    yield f"  {os.path.basename(path)} ({done // 1024 // 1024} МБ)"
 
 
-def ensure_pretrains(vocoder, choice, sample_rate):
-    """Скачивает претрейн вокодера при необходимости.
+def ensure_pretrains(choice, sample_rate):
+    """Скачивает претрейн при необходимости.
 
     Генератор: отдаёт строки для журнала, возвращает (путь G, путь D).
     Вызывать через `g, d = yield from ensure_pretrains(...)`.
     """
     rate = rate_label(sample_rate)
-    if not has_pretrains(vocoder):
-        raise ValueError(
-            f"У вокодера «{vocoder}» нет встроенных претрейнов — выберите «{NO_PRETRAIN}» или укажите свои G/D."
-        )
-    if choice not in pretrain_sets(vocoder):
-        raise ValueError(
-            f"Претрейн «{choice}» несовместим с вокодером «{vocoder}»: наборы привязаны к архитектуре генератора."
-        )
-    files = pretrain_files(vocoder, choice, sample_rate)
+    if choice not in PRETRAINS:
+        raise ValueError(f"Неизвестный претрейн «{choice}».")
+    files = pretrain_files(choice, sample_rate)
     if files is None:
-        rates = ", ".join(pretrain_rates(vocoder, choice))
+        rates = ", ".join(pretrain_rates(choice))
         raise ValueError(f"Претрейн «{choice}» доступен только для {rates}.")
 
     d_file, g_file = files
@@ -132,7 +124,7 @@ def ensure_pretrains(vocoder, choice, sample_rate):
     for kind, remote_file in (("D", d_file), ("G", g_file)):
         local_path = os.path.join(PRETRAINS_DIR, f"{safe_name}_{rate}_{kind}.pth")
         if os.path.isfile(local_path):
-            yield f"  ✓ {os.path.basename(local_path)} уже установлен"
+            yield f"  {os.path.basename(local_path)} уже установлен"
         else:
             remote = f"{PRETRAINS_BASE_URL}{rate}/{remote_file}"
             yield f"⬇ Скачиваю {choice} ({rate}, {kind})…"

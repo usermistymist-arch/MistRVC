@@ -1,5 +1,4 @@
 import torch
-import torch.nn.functional as F
 from torch.nn.utils.parametrizations import weight_norm
 from torch.utils.checkpoint import checkpoint
 
@@ -17,21 +16,14 @@ class MultiPeriodDiscriminator(torch.nn.Module):
 
     """
 
-    def __init__(self, checkpointing: bool = False, version: str = "HiFi-GAN"):
+    def __init__(self, checkpointing: bool = False):
         super().__init__()
 
-        if version == "RefineGAN":
-            periods = [2, 3, 5, 7, 11]
-            resolutions = [[1024, 120, 600], [2048, 240, 1200], [512, 50, 240]]
-        else:
-            periods = [2, 3, 5, 7, 11, 17, 23, 37]
-            resolutions = []
+        periods = [2, 3, 5, 7, 11, 17, 23, 37]
 
         self.checkpointing = checkpointing
         self.discriminators = torch.nn.ModuleList(
-            [DiscriminatorS()]
-            + [DiscriminatorP(p) for p in periods]
-            + [DiscriminatorR(r) for r in resolutions],
+            [DiscriminatorS()] + [DiscriminatorP(p) for p in periods]
         )
 
     def forward(self, y, y_hat):
@@ -147,66 +139,3 @@ class DiscriminatorP(torch.nn.Module):
         fmap.append(x)
         x = torch.flatten(x, 1, -1)
         return x, fmap
-
-
-class DiscriminatorR(torch.nn.Module):
-    def __init__(self, resolution):
-        super().__init__()
-
-        self.resolution = resolution
-        self.lrelu_slope = 0.1
-
-        self.convs = torch.nn.ModuleList(
-            [
-                weight_norm(torch.nn.Conv2d(1, 32, (3, 9), padding=(1, 4))),
-                weight_norm(
-                    torch.nn.Conv2d(32, 32, (3, 9), stride=(1, 2), padding=(1, 4))
-                ),
-                weight_norm(
-                    torch.nn.Conv2d(32, 32, (3, 9), stride=(1, 2), padding=(1, 4))
-                ),
-                weight_norm(
-                    torch.nn.Conv2d(32, 32, (3, 9), stride=(1, 2), padding=(1, 4))
-                ),
-                weight_norm(torch.nn.Conv2d(32, 32, (3, 3), padding=(1, 1))),
-            ],
-        )
-        self.conv_post = weight_norm(torch.nn.Conv2d(32, 1, (3, 3), padding=(1, 1)))
-
-    def forward(self, x):
-        fmap = []
-
-        x = self.spectrogram(x).unsqueeze(1)
-
-        for layer in self.convs:
-            x = F.leaky_relu(layer(x), self.lrelu_slope)
-            fmap.append(x)
-        x = self.conv_post(x)
-        fmap.append(x)
-
-        return torch.flatten(x, 1, -1), fmap
-
-    def spectrogram(self, x):
-        n_fft, hop_length, win_length = self.resolution
-        pad = int((n_fft - hop_length) / 2)
-        # Детерминированный аналог F.pad(mode="reflect") для x[..., t], t > pad.
-        if x.shape[-1] > pad:
-            x = torch.cat(
-                [x[..., 1 : pad + 1].flip(-1), x, x[..., -(pad + 1) : -1].flip(-1)],
-                dim=-1,
-            ).squeeze(1)
-        else:
-            x = F.pad(x, (pad, pad), mode="reflect").squeeze(1)
-        x = torch.stft(
-            x,
-            n_fft=n_fft,
-            hop_length=hop_length,
-            win_length=win_length,
-            window=torch.ones(win_length, device=x.device),
-            center=False,
-            return_complex=True,
-        )
-
-        mag = torch.norm(torch.view_as_real(x), p=2, dim=-1)  # [B, F, TT]
-
-        return mag

@@ -26,7 +26,6 @@ from gradio_ui.jobs import command, request_stop, run_job
 from rvc.training.utils.probe import MODE_NAMES, locked_probe
 
 SAMPLE_RATES = [32000, 40000, 48000]
-DEFAULT_VOCODER = "HiFi-GAN"
 DEFAULT_GPUS = "0"
 DEFAULT_SEED = 1032003
 DEFAULT_PROBE = "fixed"
@@ -127,8 +126,8 @@ def _step_states(model_name):
 
 def _refresh_pretrains(sample_rate, current):
     """Список претрейнов под выбранную частоту; чужой выбор сбрасывается."""
-    choices = pretrain_choices(DEFAULT_VOCODER, sample_rate)
-    default = default_pretrain(DEFAULT_VOCODER, sample_rate)
+    choices = pretrain_choices(sample_rate)
+    default = default_pretrain(sample_rate)
     value = current if current in choices else default
     return gr.update(choices=choices, value=value)
 
@@ -206,14 +205,13 @@ def _train_index(model_name):
     )
 
 
-def _check_config(
-    model_name: str, exp_dir: str, vocoder: str, sample_rate: int
-) -> None:
-    """Сверяет вокодер и частоту с уже созданной конфигурацией модели.
+def _check_config(model_name: str, exp_dir: str, sample_rate: int) -> None:
+    """Сверяет частоту с уже созданной конфигурацией модели.
 
     `data/config.json` пишется один раз при первом запуске обучения, поэтому
-    смена вокодера или частоты у существующей модели иначе прошла бы молча:
+    смена частоты у существующей модели иначе прошла бы молча:
     `rvc.training.train` берёт архитектуру и частоту именно из этого файла.
+    Вокодер сверяется только как защита: поддерживается лишь HiFi-GAN.
     """
     config_path = os.path.join(exp_dir, "data", "config.json")
     if not os.path.isfile(config_path):
@@ -224,15 +222,19 @@ def _check_config(
     except (OSError, json.JSONDecodeError) as error:
         raise gr.Error(f"Не удалось прочитать {config_path}: {error}") from error
 
-    saved_vocoder = config.get("model", {}).get("vocoder", DEFAULT_VOCODER)
+    saved_vocoder = config.get("model", {}).get("vocoder", "HiFi-GAN")
+    if saved_vocoder != "HiFi-GAN":
+        raise gr.Error(
+            f"Модель «{model_name}» обучена с вокодером «{saved_vocoder}», "
+            "который больше не поддерживается. MistRVC работает только с HiFi-GAN."
+        )
     saved_rate = int(config.get("data", {}).get("sample_rate", sample_rate))
-    if saved_vocoder == vocoder and saved_rate == sample_rate:
-        return
-    raise gr.Error(
-        f"Модель «{model_name}» уже настроена на вокодер «{saved_vocoder}» и {saved_rate} Hz. "
-        "Смена вокодера и частоты возможна только для новой модели: удалите "
-        f"{config_path} или возьмите другое имя.",
-    )
+    if saved_rate != sample_rate:
+        raise gr.Error(
+            f"Модель «{model_name}» уже настроена на {saved_rate} Hz. "
+            "Смена частоты возможна только для новой модели: удалите "
+            f"{config_path} или возьмите другое имя."
+        )
 
 
 def _locked_seed(exp_dir: str):
@@ -311,7 +313,7 @@ def _probe_state(model_name):
             gr.update(interactive=True, info=PROBE_SIZE_INFO),
         )
     mode, size = locked
-    note = f"Набор модели «{name}» зафиксирован в data/probe.json — менять его нельзя."
+    note = f"Набор модели «{name}» зафиксирован в data/meta.json — менять его нельзя."
     return (
         gr.update(value=mode, interactive=False, info=note),
         gr.update(value=size, interactive=False, info=note),
@@ -360,9 +362,9 @@ def _prepare_manual_pretrain(kind: str, value: str):
     if value.startswith(("http://", "https://")):
         local_path = _url_pretrain_path(kind, value)
         if os.path.isfile(local_path):
-            yield f"  ✓ {os.path.basename(local_path)} уже скачан"
+            yield f"{os.path.basename(local_path)} уже скачан"
             return local_path
-        yield f"⬇ Скачиваю претрейн {kind}…"
+        yield f"Скачиваю претрейн {kind}…"
         try:
             yield from download_with_progress(value, local_path)
         except (requests.RequestException, ValueError) as error:
@@ -375,7 +377,7 @@ def _prepare_manual_pretrain(kind: str, value: str):
     return value
 
 
-def _resolve_pretrains(pretrain, pretrain_g, pretrain_d, vocoder, sample_rate, exp_dir):
+def _resolve_pretrains(pretrain, pretrain_g, pretrain_d, sample_rate, exp_dir):
     """Пути претрейнов G/D: свои файлы или ссылки, встроенный набор или ничего.
 
     Генератор: отдаёт строки журнала, возвращает (путь G, путь D).
@@ -398,7 +400,7 @@ def _resolve_pretrains(pretrain, pretrain_g, pretrain_d, vocoder, sample_rate, e
         yield "• Без претрейна: потребуется больше эпох и данных."
         return None, None
     try:
-        return (yield from ensure_pretrains(vocoder, pretrain, sample_rate))
+        return (yield from ensure_pretrains(pretrain, sample_rate))
     except ValueError as error:
         raise gr.Error(str(error)) from error
 
@@ -454,8 +456,7 @@ def _train_model(
         raise gr.Error(
             "Нет filelist.txt — сначала выполните нарезку и извлечение признаков."
         )
-    vocoder = DEFAULT_VOCODER
-    _check_config(model_name, exp_dir, vocoder, int(sample_rate))
+    _check_config(model_name, exp_dir, int(sample_rate))
     locked_seed = _locked_seed(exp_dir)
     seed_note = ""
     if locked_seed is not None and seed is not None and int(seed) != locked_seed:
@@ -493,8 +494,6 @@ def _train_model(
         int(batch_size),
         "--sample_rate",
         int(sample_rate),
-        "--vocoder",
-        DEFAULT_VOCODER,
         "--gpus",
         DEFAULT_GPUS,
         "--save_to_zip",
@@ -518,7 +517,7 @@ def _train_model(
         _prefixed(
             "\n".join(part for part in (seed_note, probe_note) if part),
             _resolve_pretrains(
-                pretrain, pretrain_g, pretrain_d, vocoder, int(sample_rate), exp_dir
+                pretrain, pretrain_g, pretrain_d, int(sample_rate), exp_dir
             ),
         ),
     )
@@ -561,9 +560,9 @@ def training_tab():
                     minimum=0, maximum=10, step=1, value=2, label="Мьют-файлов"
                 )
             with gr.Row(equal_height=True):
-                slice_btn = gr.Button("1. Нарезать", variant="primary")
+                slice_btn = gr.Button("1. Нарезать на сегменты", variant="primary")
                 extract_btn = gr.Button(
-                    "2. Извлечь", variant="primary", interactive=False
+                    "2. Извлечь признаки", variant="primary", interactive=False
                 )
                 index_btn = gr.Button(
                     "3. Построить индекс", variant="primary", interactive=False
@@ -583,8 +582,8 @@ def training_tab():
             )
         with gr.Row(equal_height=True):
             pretrain = gr.Dropdown(
-                pretrain_choices(DEFAULT_VOCODER, 48000),
-                value=default_pretrain(DEFAULT_VOCODER, 48000),
+                pretrain_choices(48000),
+                value=default_pretrain(48000),
                 label="Претрейн",
                 scale=1,
             )
@@ -699,6 +698,11 @@ def training_tab():
     extract_btn.click(
         _extract_features,
         inputs=[model_name, sample_rate, f0_method, include_mutes],
+        outputs=log,
+    ).then(_step_states, inputs=model_name, outputs=step_buttons, api_name=False)
+    index_btn.click(
+        _train_index,
+        inputs=model_name,
         outputs=log,
     ).then(_step_states, inputs=model_name, outputs=step_buttons, api_name=False)
     train_btn.click(

@@ -140,7 +140,7 @@ def _separate(
         raise gr.Error("Выберите модель.")
 
     base_name = os.path.splitext(os.path.basename(audio_path))[0]
-    print(f"\n🎵 UVR [{arch}] — {base_name} — {model_key}")
+    print(f"\nUVR [{arch}] — {base_name} — {model_key}")
 
     if arch == "Roformer":
         model_filename, extra = (

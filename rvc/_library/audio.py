@@ -1,4 +1,5 @@
 import os
+import re
 import shutil
 import subprocess
 from functools import lru_cache
@@ -128,6 +129,36 @@ def load_audio(file: str, sample_rate: int) -> np.ndarray:
         raise RuntimeError(f"В файле '{file}' нет аудиоданных.")
 
     return np.frombuffer(process.stdout, np.float32).flatten()
+
+
+def audio_duration(file: str) -> float:
+    """Длительность аудио в секундах по заголовку, без декодирования.
+
+    Берётся строка `Duration:` из stderr того же FFmpeg, что читает аудио,
+    поэтому понимаются все форматы, которые поддерживает load_audio.
+    Без выходного файла FFmpeg завершается с кодом 1 — это ожидаемо.
+    Возвращает 0.0, если длительность определить не удалось.
+    """
+    file = file.strip().strip("\"'").strip()
+    cmd = [ffmpeg_bin(), "-nostdin", "-hide_banner", "-i", file]
+    try:
+        process = subprocess.run(
+            cmd,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
+            timeout=LOAD_TIMEOUT,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return 0.0
+    found = re.search(
+        r"Duration:\s*(\d+):(\d+):(\d+(?:\.\d+)?)",
+        process.stderr.decode(errors="replace"),
+    )
+    if not found:
+        return 0.0
+    hours, minutes, seconds = found.groups()
+    return int(hours) * 3600 + int(minutes) * 60 + float(seconds)
 
 
 def save_audio(

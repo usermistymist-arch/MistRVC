@@ -76,7 +76,7 @@ from rvc.training.utils.data_utils import (
     TextAudioCollateMultiNSFsid,
     TextAudioLoaderMultiNSFsid,
 )
-from rvc.training.utils.probe import setup_probe
+from rvc.training.utils.probe import dataset_info, setup_probe
 from rvc.training.utils.train_utils import (
     HParams,
     extract_model,
@@ -111,6 +111,14 @@ def _strtobool(val):
     return val.lower() in ("yes", "true", "t", "y", "on", "1")
 
 
+def _format_duration(seconds):
+    """Секунды -> '45.2 с' или '3 мин 06.0 с'."""
+    if seconds < 60:
+        return f"{seconds:.1f} с"
+    minutes = int(seconds // 60)
+    return f"{minutes} мин {seconds - minutes * 60:04.1f} с"
+
+
 def get_hparams():
     parser = argparse.ArgumentParser()
     parser.add_argument("--experiment_dir", type=str, required=True)
@@ -122,12 +130,6 @@ def get_hparams():
     parser.add_argument("--batch_size", type=int, choices=range(1, 129), default=8)
     parser.add_argument(
         "--sample_rate", type=int, choices=[32000, 40000, 48000], default=48000
-    )
-    parser.add_argument(
-        "--vocoder",
-        type=str,
-        choices=["HiFi-GAN", "MRF HiFi-GAN", "RefineGAN"],
-        default="HiFi-GAN",
     )
     parser.add_argument("--pretrain_g", type=str, default=None)
     parser.add_argument("--pretrain_d", type=str, default=None)
@@ -159,11 +161,18 @@ def get_hparams():
     if not config_existed:
         from rvc._library.config import generate_config
 
-        generate_config(config_save_path, args.sample_rate, args.vocoder)
+        generate_config(config_save_path, args.sample_rate)
 
     # Загрузка файла конфигурации
     with open(config_save_path, encoding="utf-8") as f:
         config = json.load(f)
+
+    saved_vocoder = config.get("model", {}).get("vocoder", "HiFi-GAN")
+    if saved_vocoder != "HiFi-GAN":
+        parser.error(
+            f"Модель настроена на вокодер «{saved_vocoder}», который больше не поддерживается. "
+            "MistRVC обучает только HiFi-GAN."
+        )
 
     train_config = config.setdefault("train", {})
     saved_seed = int(train_config.get("seed", 1032003))
@@ -226,11 +235,16 @@ def get_hparams():
     print("=" * 70)
     print(f"{'Папка сохранения:':<30} {hparams.model_dir}")
     print(f"{'Имя модели:':<30} {hparams.model_name}")
+    total_sec, segment_sec = dataset_info(experiment_dir)
+    dataset_note = _format_duration(total_sec) if total_sec is not None else "—"
+    segment_note = f"{segment_sec:.1f} сек" if segment_sec is not None else "—"
+    print(f"{'Длина датасета:':<30} {dataset_note}")
+    print(f"{'Длина сегмента:':<30} {segment_note}")
     print(f"{'Эпох обучения:':<30} {hparams.total_epoch}")
     print(f"{'Сохранение каждые:':<30} {hparams.save_every_epoch} эпох")
     print(f"{'Размер батча:':<30} {hparams.batch_size}")
     print(f"{'Частота дискретизации:':<30} {hparams.data.sample_rate} Hz")
-    print(f"{'Вокодер:':<30} {hparams.model.vocoder}")
+    print(f"{'Вокодер:':<30} HiFi-GAN")
     print(f"{'Оптимизатор:':<30} AdamW")
     if args.pretrain_g:
         print(f"{'Претрейн G:':<30} {hparams.pretrain_g}")
@@ -438,7 +452,7 @@ def run(hps, rank, n_gpus, device, device_id):
             checkpointing=False,
             randomized=True,
         )
-        net_d = MultiPeriodDiscriminator(checkpointing=False, version=hps.model.vocoder)
+        net_d = MultiPeriodDiscriminator(checkpointing=False)
 
         if device.type == "cuda":
             net_g = net_g.cuda(device_id)
@@ -590,11 +604,7 @@ def run(hps, rank, n_gpus, device, device_id):
 
 
 # Имена субдискриминаторов (порядок из discriminators.py)
-_DISC_NAMES = {
-    "HiFi-GAN": ["S", "P2", "P3", "P5", "P7", "P11", "P17", "P23", "P37"],
-    "MRF HiFi-GAN": ["S", "P2", "P3", "P5", "P7", "P11", "P17", "P23", "P37"],
-    "RefineGAN": ["S", "P2", "P3", "P5", "P7", "P11", "R1024", "R2048", "R512"],
-}
+_DISC_NAMES = ["S", "P2", "P3", "P5", "P7", "P11", "P17", "P23", "P37"]
 # Мел-масштабы (порядок n_mels в MultiScaleMelSpectrogramLoss) → группа.
 # coarse — огибающая энергии, mid — форманты, fine — гармоническая деталь.
 # Внутри группы кривые почти совпадают, отдельные теги дублировали сумму.
@@ -732,7 +742,7 @@ def train_and_evaluate(
     net_d.train()
 
     last_batch = None
-    disc_names = _DISC_NAMES[hps.model.vocoder]
+    disc_names = _DISC_NAMES
 
     progress = tqdm(
         train_loader,
@@ -830,8 +840,7 @@ def train_and_evaluate(
         # равна grad/norm_d, и дублировать её в графиках незачем.
         if grad_norm_d_pre is not None:
             acc_update_dict["grad/norm_d_pre_clip"] = grad_norm_d_pre
-        # FM группируем по типу входа: S — сырой waveform, P — периодная
-        # развёртка, R — спектрограмма (только RefineGAN).
+        # FM группируем по типу входа: S — сырой waveform, P — периодная развёртка.
         fm_groups = {}
         for name, fml in zip(disc_names, fm_per_disc):
             group = name[0]
