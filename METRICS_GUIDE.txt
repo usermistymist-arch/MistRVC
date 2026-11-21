@@ -1,4 +1,4 @@
-ИНТЕРПРЕТАЦИЯ МЕТРИК MistRVC (v0.8.5, HiFi-GAN NSF)
+ИНТЕРПРЕТАЦИЯ МЕТРИК MistRVC (v0.8.6, HiFi-GAN NSF)
 
 Источник истины: rvc/training/train.py (+ losses.py, mel_processing.py,
 visualization.py, utils/probe.py, utils/data_utils.py, configs/*.json).
@@ -98,7 +98,7 @@ visualization.py, utils/probe.py, utils/data_utils.py, configs/*.json).
 5. F0-МЕТРИКИ (visualization.py)
 
 - F0 сгенерированного аудио оценивается автокорреляцией (кадр 40 мс,
-  диапазон 50-1100 Гц, параболическая интерполяция лага, voiced-гейт:
+  диапазон 61-2218 Гц, параболическая интерполяция лага, voiced-гейт:
   rms>0.003 и periodicity>0.25). Цель - pitchf из датасета (RMVPE и т.п.,
   посчитан при препроцессе). Это разные оценщики -> есть шумовой пол.
 - Ошибка = 1200*|log2(f0_fake/f0_target)| центов, clamp 2400; только кадры,

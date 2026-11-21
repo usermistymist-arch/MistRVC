@@ -80,7 +80,8 @@ class VC:
     def get_f0(self, audio, p_len, pitch, f0_min, f0_max, f0_method):
         """Получает F0 с использованием выбранного метода."""
         f0 = None
-        f0_mel_min = 1127 * np.log(1 + f0_min / 700)
+        # Нижний якорь квантования — как в preparing_data.py (61 Гц), не с ползунка
+        f0_mel_min = 1127 * np.log(1 + 61 / 700)
 
         if f0_method in ("crepe", "crepe-tiny"):
             model = CREPEF0(
@@ -96,8 +97,17 @@ class VC:
             del model
         elif f0_method in ("rmvpe", "hpa-rmvpe"):
             model = RMVPEF0(device=self.device, sample_rate=self.sample_rate)
-            f0 = model.get_f0(audio, f0_min, f0_max, f0_method)
+            f0 = model.get_f0(
+                audio,
+                f0_min,
+                f0_max,
+                f0_method,
+                extended=(f0_max > 1438),
+            )
             del model
+            # Ползунки диапазона реально ограничивают детекцию (до питч-шифта):
+            # вне [f0_min, f0_max] -> глухой кадр. В обучении не применяется.
+            f0[(f0 < f0_min) | (f0 > f0_max)] = 0
         elif f0_method == "fcpe":
             model = FCPEF0(
                 device=self.device, sample_rate=self.sample_rate, hop_size=self.window

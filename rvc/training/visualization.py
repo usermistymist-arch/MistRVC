@@ -91,7 +91,7 @@ def mel_spectrogram_similarity(y_hat_mel, y_mel):
 
 
 def _estimate_f0_autocorr(
-    wav, sample_rate, hop_length, f0_min=50.0, f0_max=1100.0, frame_ms=40.0
+    wav, sample_rate, hop_length, f0_min=61.0, f0_max=2218.0, frame_ms=40.0
 ):
     """Быстрая оценка F0 через автокорреляцию для онлайн-метрики."""
     wav = wav.squeeze(1) if wav.dim() == 3 else wav
@@ -132,7 +132,7 @@ def _estimate_f0_autocorr(
     peak_region = autocorr[..., min_lag : max_lag + 1]
     peak_values, peak_indices = peak_region.max(dim=-1)
 
-    # Целый лаг квантует частоту с шагом f0^2/sr: на 1100 Гц это ~40 центов,
+    # Целый лаг квантует частоту с шагом f0^2/sr: на 2218 Гц это ~78 центов,
     # на 500 Гц ~18. Парабола по трём отсчётам даёт дробный лаг и убирает
     # этот шумовой пол измерителя.
     idx = peak_indices.unsqueeze(-1)

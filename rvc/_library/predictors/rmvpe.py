@@ -783,8 +783,22 @@ class RMVPE:
         f0 = self.decode(hidden, thred=thred)
         return f0
 
+    def infer_from_audio_conf(self, audio, thred=0.03):
+        audio = torch.from_numpy(audio).float().to(self.device).unsqueeze(0)
+        mel = self.mel_extractor(audio, center=True)
+        hidden = self.mel2hidden(mel)
+        hidden = hidden.squeeze(0).cpu().numpy()
+        if self.hpa:
+            hidden = hidden.astype(np.float32)
+        conf = np.max(hidden, axis=1)
+        cents_pred = self.to_local_average_cents(hidden, thred=thred)
+        f0 = 10 * (2 ** (cents_pred / 1200))
+        f0[f0 == 10] = 0
+        conf[f0 == 0] = 0.0
+        return f0, conf
+
     def infer_from_audio_medfilt(
-        self, audio, thred=0.03, f0_min=50, f0_max=2218, window_size=3
+        self, audio, thred=0.03, f0_min=61, f0_max=2218, window_size=3
     ):
         f0 = self.infer_from_audio(audio, thred)
         f0[(f0 < f0_min) | (f0 > f0_max)] = 0

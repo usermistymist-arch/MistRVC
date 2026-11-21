@@ -54,7 +54,7 @@ class DataPreprocessor:
         self.sample_rate = 16000
         self.hop_size = 160
         self.f0_bin = 256
-        self.f0_min = 50.0
+        self.f0_min = 61.0
         self.f0_max = 2218.0
         self.f0_mel_min = 1127 * np.log(1 + self.f0_min / 700)
         self.f0_mel_max = 1127 * np.log(1 + self.f0_max / 700)
@@ -85,7 +85,9 @@ class DataPreprocessor:
     def compute_f0(self, path, f0_method):
         """Вычисление F0"""
         audio = self._read_16k(path)
-        return self.model_rmvpe.get_f0(audio, self.f0_min, self.f0_max, f0_method)
+        return self.model_rmvpe.get_f0(
+            audio, self.f0_min, self.f0_max, f0_method, extended=True
+        )
 
     def coarse_f0(self, f0):
         """Квантование F0"""

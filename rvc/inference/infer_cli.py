@@ -41,9 +41,9 @@ def create_parser():
     base.add_argument(
         "--f0_method", type=str, default="rmvpe", help="Метод извлечения F0"
     )
-    base.add_argument("--f0_min", type=int, default=50, help="Минимальная частота F0")
+    base.add_argument("--f0_min", type=int, default=61, help="Минимальная частота F0")
     base.add_argument(
-        "--f0_max", type=int, default=1100, help="Максимальная частота F0"
+        "--f0_max", type=int, default=2218, help="Максимальная частота F0"
     )
     base.add_argument(
         "--rvc_pitch", type=float, default=0, help="Высота тона RVC модели"
