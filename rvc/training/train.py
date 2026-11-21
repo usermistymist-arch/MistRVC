@@ -713,8 +713,14 @@ def evaluate_probe(hps, net_g, eval_batches, device, device_id):
         scalars["eval/probe_f0_median"] = errors.median().item()
         scalars["eval/probe_f0_frames"] = int(errors.numel())
     if first_mels is not None:
-        images["mel/probe/real"] = plot_spectrogram_to_numpy(first_mels[0])
-        images["mel/probe/fake"] = plot_spectrogram_to_numpy(first_mels[1])
+        mel_axes = dict(
+            sample_rate=hps.data.sample_rate,
+            hop_length=hps.data.hop_length,
+            mel_fmin=hps.data.mel_fmin,
+            mel_fmax=hps.data.mel_fmax,
+        )
+        images["mel/probe/real"] = plot_spectrogram_to_numpy(first_mels[0], **mel_axes)
+        images["mel/probe/fake"] = plot_spectrogram_to_numpy(first_mels[1], **mel_axes)
     return scalars, images
 
 
@@ -938,11 +944,17 @@ def train_and_evaluate(
                 scalar_dict["eval/f0_error_cents"] = f0_mean
                 scalar_dict["eval/f0_error_median"] = f0_median
                 scalar_dict["eval/f0_frames"] = f0_frames
+            mel_axes = dict(
+                sample_rate=hps.data.sample_rate,
+                hop_length=hps.data.hop_length,
+                mel_fmin=hps.data.mel_fmin,
+                mel_fmax=hps.data.mel_fmax,
+            )
             image_dict["mel/slice/real"] = plot_spectrogram_to_numpy(
-                y_mel[0].data.cpu().numpy()
+                y_mel[0].data.cpu().numpy(), **mel_axes
             )
             image_dict["mel/slice/fake"] = plot_spectrogram_to_numpy(
-                y_hat_mel[0].data.cpu().numpy()
+                y_hat_mel[0].data.cpu().numpy(), **mel_axes
             )
         for k, v in scalar_dict.items():
             writer_eval.add_scalar(k, v, epoch)

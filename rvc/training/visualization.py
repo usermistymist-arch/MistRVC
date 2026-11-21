@@ -7,19 +7,63 @@ import torch.nn.functional as F
 from matplotlib.colors import Normalize
 
 
-def plot_spectrogram_to_numpy(spectrogram, figsize=(10, 4), cmap="viridis"):
-    """Визуализация Mel-спектрограммы."""
+def plot_spectrogram_to_numpy(
+    spectrogram,
+    figsize=(10, 4),
+    cmap="viridis",
+    sample_rate=None,
+    hop_length=None,
+    mel_fmin=0.0,
+    mel_fmax=None,
+):
+    """Визуализация Mel-спектрограммы.
+
+    spectrogram — натуральный логарифм мел-амплитуды (spec_to_mel_torch).
+    Если переданы sample_rate и hop_length, оси подписываются в Гц и секундах;
+    иначе — старая разметка в каналах/кадрах.
+    """
+    # ln(amplitude) -> dB: те же цвета, что при Normalize(-10, 0) на ln-шкале
+    db_per_ln = 20.0 / math.log(10.0)
     fig, ax = plt.subplots(figsize=figsize)
     im = ax.imshow(
-        spectrogram,
+        spectrogram * db_per_ln,
         aspect="auto",
         origin="lower",
         cmap=cmap,
-        norm=Normalize(vmin=-10, vmax=0),
+        norm=Normalize(vmin=-10.0 * db_per_ln, vmax=0.0),
     )
-    plt.colorbar(im, ax=ax, format="%+2.0f dB")
-    plt.xlabel("Кадры")
-    plt.ylabel("Частотные каналы")
+    cbar = fig.colorbar(im, ax=ax, format="%+.0f dB")
+    cbar.set_label("Уровень, дБ")
+
+    n_mels, n_frames = spectrogram.shape
+    if sample_rate and hop_length:
+        from librosa import mel_frequencies
+
+        # Тот же slaney-мел, что и librosa.filters.mel в spec_to_mel_torch
+        freqs = mel_frequencies(
+            n_mels=n_mels, fmin=mel_fmin, fmax=mel_fmax or sample_rate / 2
+        )
+        ticks, labels = [], []
+        for hz in (0, 250, 500, 1000, 2000, 4000, 8000, 16000, 24000):
+            if hz > (mel_fmax or sample_rate / 2):
+                continue
+            ch = int(np.argmin(np.abs(freqs - hz)))
+            if ch in ticks:  # на 32k низкие тики могут совпасть каналом
+                continue
+            ticks.append(ch)
+            labels.append(f"{hz // 1000}k" if hz >= 1000 else str(hz))
+        ax.set_yticks(ticks)
+        ax.set_yticklabels(labels)
+        ax.set_ylabel("Частота, Гц (mel-шкала)")
+
+        step = max(1, round(0.25 * sample_rate / hop_length))  # тик ~0.25 с
+        xs = np.arange(0, n_frames, step)
+        ax.set_xticks(xs)
+        ax.set_xticklabels([f"{i * hop_length / sample_rate:.2f}" for i in xs])
+        ax.set_xlabel("Время, с")
+    else:
+        ax.set_xlabel("Кадры")
+        ax.set_ylabel("Частотные каналы")
     plt.tight_layout()
 
     fig.canvas.draw()
@@ -53,10 +97,10 @@ def _estimate_f0_autocorr(
     wav = wav.squeeze(1) if wav.dim() == 3 else wav
     original_device = wav.device
 
-    # На MPS torch.fft в некоторых версиях PyTorch может быть нестабилен/недоступен.
-    wav = (
-        wav.detach().float().cpu() if wav.device.type == "mps" else wav.detach().float()
-    )
+    # FFT всегда на CPU: на CUDA cuFFT выделяет буферы мимо аллокатора PyTorch
+    # и при занятой VRAM падает с CUFFT_INTERNAL_ERROR; на MPS torch.fft нестабилен.
+    # Объём крошечный (сотни кадров) — на CPU миллисекунды; результат вернём на исходное устройство.
+    wav = wav.detach().float().cpu()
 
     frame_length = int(sample_rate * frame_ms / 1000.0)
     frame_length = max(frame_length, int(sample_rate / f0_min) * 2, hop_length * 2)

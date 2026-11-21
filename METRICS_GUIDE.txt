@@ -1,4 +1,4 @@
-ИНТЕРПРЕТАЦИЯ МЕТРИК MistRVC (v0.8.4, HiFi-GAN NSF)
+ИНТЕРПРЕТАЦИЯ МЕТРИК MistRVC (v0.8.5, HiFi-GAN NSF)
 
 Источник истины: rvc/training/train.py (+ losses.py, mel_processing.py,
 visualization.py, utils/probe.py, utils/data_utils.py, configs/*.json).
