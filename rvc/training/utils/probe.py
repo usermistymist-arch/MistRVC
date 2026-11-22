@@ -46,11 +46,31 @@ def _key(line):
     return (parts[-1], stem, 0)
 
 
-def _choose(candidates, size):
-    """Сплошной блок из `size` сегментов и его соседи (отступ).
+def _speaker_quotas(counts, size):
+    """Квоты по спикерам, пропорциональные числу их сегментов.
 
-    Блок берётся из середины самого большого исходника: так в зонд не
-    попадают обрезанные края записи, а соседи по idx1 не остаются в обучении.
+    Метод наибольших остатков: сначала целые части долей, затем недостающие
+    сегменты раздаются спикерам с наибольшей дробной частью. Сумма квот
+    всегда равна size; порядок разрешения ничьих детерминирован.
+    """
+    total = sum(counts.values())
+    raw = {sid: size * n / total for sid, n in counts.items()}
+    quotas = {sid: int(value) for sid, value in raw.items()}
+    left = size - sum(quotas.values())
+    order = sorted(counts, key=lambda s: (-(raw[s] - quotas[s]), -counts[s], s))
+    for sid in order[:left]:
+        quotas[sid] += 1
+    return quotas
+
+
+def _choose(candidates, size):
+    """Зонд из `size` сегментов: квота каждого спикера пропорциональна его
+    объёму данных, внутри спикера — сплошной блок из середины его самого
+    большого исходника (при нехватке — следующих по убыванию).
+
+    Так каждый спикер теряет одинаковую долю своих данных, а большинство
+    сегментов зонда приходит от самого большого спикера: ему изъятие
+    наименее критично. Соседи блока (отступ) уходят из обучения как раньше.
     """
     groups = {}
     for line in candidates:
@@ -59,16 +79,24 @@ def _choose(candidates, size):
     for lines in groups.values():
         lines.sort(key=_key)
 
+    by_spk = {}
+    for (sid, src), lines in groups.items():
+        by_spk.setdefault(sid, []).append((src, lines))
+    counts = {sid: sum(len(lines) for _, lines in srcs) for sid, srcs in by_spk.items()}
+    quotas = _speaker_quotas(counts, size)
+
     chosen, margin = [], []
-    for key in sorted(groups, key=lambda k: (-len(groups[k]), k)):
-        lines = groups[key]
-        take = min(size - len(chosen), len(lines))
-        if take <= 0:
-            break
-        start = (len(lines) - take) // 2
-        chosen += lines[start : start + take]
-        margin += lines[max(0, start - 1) : start]
-        margin += lines[start + take : start + take + 1]
+    for sid in sorted(by_spk, key=lambda s: (-counts[s], s)):
+        need = quotas[sid]
+        for src, lines in sorted(by_spk[sid], key=lambda t: (-len(t[1]), t[0])):
+            take = min(need, len(lines))
+            if take <= 0:
+                break
+            start = (len(lines) - take) // 2
+            chosen += lines[start : start + take]
+            margin += lines[max(0, start - 1) : start]
+            margin += lines[start + take : start + take + 1]
+            need -= take
     return chosen, margin
 
 
@@ -225,6 +253,10 @@ def setup_probe(exp_dir, mode="fixed", size=0, batch_size=16):
         )
         want = min(want, len(candidates))
         chosen, margin = _choose(candidates, want)
+        per_spk = {}
+        for line in chosen:
+            sid = _key(line)[0]
+            per_spk[sid] = per_spk.get(sid, 0) + 1
         if mode == "holdout":
             rest = len(candidates) - len(chosen) - len(margin)
             if len(candidates) < _MIN_SEGMENTS or rest < 2 * batch_size:
@@ -245,6 +277,7 @@ def setup_probe(exp_dir, mode="fixed", size=0, batch_size=16):
             size=len(eval_wavs),
             eval=sorted(eval_wavs),
             margin=sorted(margin_wavs),
+            eval_spk={sid: per_spk[sid] for sid in sorted(per_spk)},
         )
 
     removed = (eval_wavs | margin_wavs) if mode == "holdout" else set()
@@ -260,4 +293,9 @@ def setup_probe(exp_dir, mode="fixed", size=0, batch_size=16):
     note = f"{MODE_NAMES[mode]}, {len(eval_lines)} сегм."
     if mode == "holdout":
         note += f"; обучение: {len(train_lines)} из {len(lines)} строк"
+    saved_spk = read_meta(exp_dir).get("eval_spk") or {}
+    if saved_spk:
+        note += "; по спикерам: " + ", ".join(
+            f"{sid}: {n}" for sid, n in sorted(saved_spk.items())
+        )
     return train_path, eval_path, note
