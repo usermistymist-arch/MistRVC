@@ -1,5 +1,5 @@
 #!/bin/bash
-# MuXVS installer for Linux and macOS.
+# MistRVC installer for Linux and macOS.
 set -euo pipefail
 
 PYTHON_VERSION="3.11"
@@ -14,7 +14,7 @@ if [ "$OS_NAME" = "Linux" ] && command -v nvidia-smi > /dev/null 2>&1; then
 fi
 
 echo "============================================="
-echo "  MuXVS Installer"
+echo "  MistRVC Installer"
 echo "  Python: $PYTHON_VERSION | Device: $TORCH_DEVICE"
 echo "============================================="
 echo
@@ -144,6 +144,6 @@ install_dependencies
 install_ffmpeg
 
 echo
-echo "MuXVS installed successfully!"
-echo "Run the application with: ./run-MuXVS.sh"
+echo "MistRVC installed successfully!"
+echo "Run the application with: ./run-MistRVC.sh"
 echo

@@ -5,15 +5,17 @@ on:
     paths:
       - 'requirements.txt'
       - 'assets/**'
-      - 'rvc/_library/**'
-      - 'rvc/inference/**'
+      - 'app.py'
+      - 'gradio_ui/**'
+      - 'rvc/**'
       - '.github/workflows/test_cli.yml'
   pull_request:
     paths:
       - 'requirements.txt'
       - 'assets/**'
-      - 'rvc/_library/**'
-      - 'rvc/inference/**'
+      - 'app.py'
+      - 'gradio_ui/**'
+      - 'rvc/**'
       - '.github/workflows/test_cli.yml'
 
 concurrency:
@@ -29,7 +31,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python-version: ['3.10', '3.11', '3.12', '3.13']
+        python-version: ['3.11', '3.12', '3.13']
 
     steps:
     - name: Checkout code
@@ -40,11 +42,6 @@ jobs:
       with:
         python-version: ${{ matrix.python-version }}
 
-    - name: Upgrade pip for Python <3.11
-      if: ${{ matrix.python-version == '3.10' }}
-      run: |
-        python -m pip install --upgrade "pip<=24.0"
-
     - name: Install ffmpeg
       run: |
         sudo apt-get update
@@ -53,7 +50,7 @@ jobs:
     - name: Install dependencies
       run: |
         pip install --no-cache-dir uv
-        uv pip install --no-cache-dir torch==2.6.0 torchaudio==2.6.0 --index-url https://download.pytorch.org/whl/cpu -q --system
+        uv pip install --no-cache-dir torch==2.14.1 torchaudio==2.11.0 --index-url https://download.pytorch.org/whl/cpu -q --system
         uv pip install --no-cache-dir -r requirements.txt -q --system
 
     - name: Install RVC models
@@ -68,6 +65,43 @@ jobs:
     - name: Run rvc script
       run: |
         python3 -m rvc.inference.infer_cli rvc --input_path "audio/test.mp3" --rvc_model "Tsoi" --f0_method "hpa-rmvpe" --f0_min 62 --f0_max 1108 --rvc_pitch -6 --protect 0.4 --index_rate 0.1 --volume_envelope 0.5 --output_format "flac"
+
+    - name: Run rvc script (rmvpe, extended F0, без индекса)
+      run: |
+        python3 -m rvc.inference.infer_cli rvc --input_path "audio/test.mp3" --rvc_model "Tsoi" --f0_method "rmvpe" --f0_min 61 --f0_max 2218 --rvc_pitch 0 --protect 0.5 --index_rate 0 --volume_envelope 1 --output_format "wav"
+
+    - name: Verify output audio
+      run: |
+        python3 - <<'PY'
+        import glob
+        import numpy as np
+        import soundfile as sf
+        import torch
+
+        pth = glob.glob("models/RVC_models/Tsoi/*.pth")[0]
+        cpt = torch.load(pth, map_location="cpu", weights_only=True)
+        expected_sr = cpt["config"][-1]
+
+        src, src_sr = sf.read("audio/test.mp3")
+        src_sec = len(src) / src_sr
+
+        files = glob.glob("output/RVC_output/*")
+        assert files, "Выходных файлов нет"
+        for f in files:
+            audio, sr = sf.read(f)
+            assert sr == expected_sr, f"{f}: sr={sr}, ожидалось {expected_sr}"
+            assert np.isfinite(audio).all(), f"{f}: NaN/Inf в сэмплах"
+            sec = len(audio) / sr
+            assert 0.7 * src_sec < sec < 1.4 * src_sec, f"{f}: {sec:.1f}s против {src_sec:.1f}s исходника"
+            rms = float(np.sqrt(np.mean(audio ** 2)))
+            assert rms > 1e-4, f"{f}: тишина (RMS={rms:.2e})"
+            print(f"OK {f}: {sr} Hz, {sec:.1f} s, RMS={rms:.4f}")
+        PY
+
+    - name: Smoke import UI и обучение
+      run: |
+        python3 -c "import app; print('app import OK; UVR доступен:', app.uvr_ui is not None)"
+        python3 -m rvc.training.train --help > /dev/null && echo "train CLI OK"
 
     - name: List output files
       if: ${{ !cancelled() }}

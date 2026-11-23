@@ -152,7 +152,7 @@ def extract_model(hps, ckpt, epoch, step, filepath, half=True):
         opt["vocoder"] = "HiFi-GAN"
 
         # Дополнительные метаданные
-        opt["learning_environment"] = "MuXVS"
+        opt["learning_environment"] = "MistRVC"
 
         # Сохранение модели
         torch.save(

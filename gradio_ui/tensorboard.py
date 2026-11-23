@@ -38,7 +38,7 @@ def _force_tensorboard_stub() -> None:
     """TensorBoard работает на своём заглушечном TF, не импортируя настоящий.
 
     При старте TensorBoard делает `import tensorflow` лишь ради проверки его
-    наличия (`tensorboard.compat.tf`). MuXVS TensorFlow не использует, а сам
+    наличия (`tensorboard.compat.tf`). MistRVC TensorFlow не использует, а сам
     импорт в свежих окружениях сыплет мусором вида «Could not find cuda
     drivers» (образы Colab переехали на CUDA 13, а TF собран под CUDA 12;
     фильтры логов вроде TF_CPP_MIN_LOG_LEVEL этот спам в новых TF не глушат).
@@ -62,7 +62,7 @@ def _force_tensorboard_stub() -> None:
     try:
         if not notf_path.exists():
             notf_path.write_text(
-                "# Force tensorflow_stub: MuXVS does not use TensorFlow.\n",
+                "# Force tensorflow_stub: MistRVC does not use TensorFlow.\n",
                 encoding="utf-8",
             )
     except OSError:

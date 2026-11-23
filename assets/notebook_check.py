@@ -13,7 +13,6 @@ def colab_check() -> bool:
             "google.colab" in sys.modules
             or bool(os.environ.get("COLAB_GPU"))
             or bool(os.environ.get("COLAB_TPU_ADDR"))
-            or (os.path.exists("/content"))
         )
 
 

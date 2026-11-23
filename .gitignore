@@ -42,3 +42,7 @@ miniconda.sh
 miniconda.exe
 ffmpeg.exe
 ffprobe.exe
+
+# Локальный запуск
+settings.json
+logs/

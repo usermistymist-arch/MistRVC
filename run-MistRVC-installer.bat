@@ -1,11 +1,11 @@
 @echo off
 setlocal enabledelayedexpansion
 chcp 65001 >nul
-title MuXVS Installer
+title MistRVC Installer
 cd /d "%~dp0"
 
 echo =============================================
-echo  MuXVS Installer
+echo  MistRVC Installer
 echo =============================================
 echo.
 
@@ -28,8 +28,8 @@ if errorlevel 1 goto :error
 
 cls
 echo.
-echo MuXVS installed successfully!
-echo To start MuXVS, run 'run-MuXVS.bat'.
+echo MistRVC installed successfully!
+echo To start MistRVC, run 'run-MistRVC.bat'.
 echo.
 pause
 exit /b 0
@@ -131,7 +131,7 @@ exit /b 0
 :verify_installation
 cls
 echo Checking the installation...
-"%ENV_DIR%\python.exe" -c "import torch, numpy, scipy, sklearn, librosa, soundfile, gradio, faiss, omegaconf, edge_tts, gdown; from FlashSR.FlashSR import FlashSR; from TorchJaekwon.Util.UtilAudio import UtilAudio"
+"%ENV_DIR%\python.exe" -c "import torch, numpy, scipy, sklearn, librosa, soundfile, gradio, faiss, omegaconf, gdown; from FlashSR.FlashSR import FlashSR; from TorchJaekwon.Util.UtilAudio import UtilAudio"
 if errorlevel 1 goto :verify_error
 echo All packages are available.
 echo.

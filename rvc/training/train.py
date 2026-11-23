@@ -125,7 +125,7 @@ def get_hparams():
     parser.add_argument("--model_name", type=str, required=True)
     parser.add_argument("--total_epoch", type=int, choices=range(1, 10001), default=300)
     parser.add_argument(
-        "--save_every_epoch", type=int, choices=range(1, 101), default=25
+        "--save_every_epoch", type=int, choices=range(1, 201), default=25
     )
     parser.add_argument("--batch_size", type=int, choices=range(1, 129), default=8)
     parser.add_argument(

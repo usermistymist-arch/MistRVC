@@ -1,5 +1,5 @@
 #!/bin/bash
-# Launch MuXVS (Linux/macOS). Requires ./run-MuXVS-installer.sh.
+# Launch MistRVC (Linux/macOS). Requires ./run-MistRVC-installer.sh.
 set -euo pipefail
 
 cd "$(dirname "$0")"
@@ -8,7 +8,7 @@ ENV_PYTHON="env/bin/python"
 
 if [ ! -x "$ENV_PYTHON" ]; then
     echo "Error: the Python environment was not found."
-    echo "Run './run-MuXVS-installer.sh' first."
+    echo "Run './run-MistRVC-installer.sh' first."
     exit 1
 fi
 

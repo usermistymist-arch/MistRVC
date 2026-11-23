@@ -2,12 +2,12 @@
 setlocal enabledelayedexpansion
 chcp 65001 >nul
 set "PYTHONUTF8=1"
-title MuXVS
+title MistRVC
 cd /d "%~dp0"
 
 if not exist "env\python.exe" (
     echo Error: the Python environment was not found.
-    echo Run 'run-MuXVS-installer.bat' first.
+    echo Run 'run-MistRVC-installer.bat' first.
     pause
     exit /b 1
 )
@@ -37,7 +37,7 @@ exit /b 0
 
 :running_interface
 cls
-echo ==== Starting MuXVS ====
+echo ==== Starting MistRVC ====
 
 if not exist "%SCRIPT%" (
     echo Critical error: main script %SCRIPT% was not found.

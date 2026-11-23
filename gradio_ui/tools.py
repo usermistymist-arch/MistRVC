@@ -66,7 +66,7 @@ def _inspect_model(model_file) -> str:
         lines.append(f"Слоёв: {len(weights)}")
     if checkpoint.get("version") != "v2" or not checkpoint.get("f0", 1):
         lines.append("")
-        lines.append("MuXVS поддерживает только v2-модели с питчем.")
+        lines.append("MistRVC поддерживает только v2-модели с питчем.")
     return "\n".join(lines)
 
 

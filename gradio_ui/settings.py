@@ -3,8 +3,20 @@ import os
 
 import gradio as gr
 
-# Путь к файлу настроек на Google Drive (для Colab)
-SETTINGS_DIR = os.environ.get("MISTRV_SETTINGS_DIR", "/content/drive/MyDrive/MistRVC")
+from assets.notebook_check import colab_check, kaggle_check
+
+_PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+# Настройки там же, где модели обучения: Drive в Colab, working в Kaggle,
+# корень репозитория локально. MISTRVC_SETTINGS_DIR переопределяет.
+if colab_check():
+    _DEFAULT_SETTINGS_DIR = "/content/drive/MyDrive/MistRVC"
+elif kaggle_check():
+    _DEFAULT_SETTINGS_DIR = "/kaggle/working/Models"
+else:
+    _DEFAULT_SETTINGS_DIR = _PROJECT_ROOT
+
+SETTINGS_DIR = os.environ.get("MISTRVC_SETTINGS_DIR", _DEFAULT_SETTINGS_DIR)
 SETTINGS_FILE = os.path.join(SETTINGS_DIR, "settings.json")
 
 # Дефолтные настройки
