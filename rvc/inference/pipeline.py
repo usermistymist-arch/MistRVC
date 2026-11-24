@@ -184,10 +184,19 @@ class VC:
             )
 
         p_len = audio0.shape[0] // self.window
+        # ContentVec отдаёт на 1-2 кадра меньше, чем audio//window. Раньше p_len
+        # урезался до feats, и каждый сегмент терял deficit*hop сэмплов -> тайминги
+        # плыли на склейках. Вместо урезания дополняем feats до p_len: эти кадры
+        # попадают в обрезаемый правый паддинг и на сохраняемый звук не влияют.
         if feats.shape[1] < p_len:
-            p_len = feats.shape[1]
-            pitch = pitch[:, :p_len]
-            pitchf = pitchf[:, :p_len]
+            pad = p_len - feats.shape[1]
+            feats = F.pad(feats, (0, 0, 0, pad))
+            if protect < 0.5:
+                feats0 = F.pad(feats0, (0, 0, 0, pad))
+        elif feats.shape[1] > p_len:
+            feats = feats[:, :p_len]
+            if protect < 0.5:
+                feats0 = feats0[:, :p_len]
 
         if protect < 0.5:
             pitchff = pitchf.clone()
@@ -278,7 +287,7 @@ class VC:
         for t in tqdm(opt_ts, desc="Конвертация"):
             t = t // self.window * self.window
 
-            audio_segment = audio_pad[s : t + self.t_pad2 + self.window]
+            audio_segment = audio_pad[s : t + self.t_pad2]
             pitch_segment = pitch_tensor[
                 :, s // self.window : (t + self.t_pad2) // self.window
             ]
@@ -325,6 +334,13 @@ class VC:
         )
 
         audio_opt = np.concatenate(audio_opt)
+        # Склейки и округление //window дают ±доли окна на хвосте;
+        # приводим длину ровно к входной, чтобы тайминги не плыли.
+        expected = int(round(audio.shape[0] * self.tgt_sr / self.sample_rate))
+        if audio_opt.shape[0] > expected:
+            audio_opt = audio_opt[:expected]
+        elif audio_opt.shape[0] < expected:
+            audio_opt = np.pad(audio_opt, (0, expected - audio_opt.shape[0]))
         if volume_envelope != 1:
             audio_opt = AudioProcessor.change_rms(
                 audio, self.sample_rate, audio_opt, self.tgt_sr, volume_envelope

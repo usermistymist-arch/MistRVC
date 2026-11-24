@@ -14,6 +14,7 @@ RVC_MODELS_DIR = os.path.join(PROJECT_ROOT, "models", "RVC_models")
 RVC_OUTPUT_DIR = os.path.join(PROJECT_ROOT, "output", "RVC_output")
 UVR_MODELS_DIR = os.path.join(PROJECT_ROOT, "models", "UVR_models")
 UVR_OUTPUT_DIR = os.path.join(PROJECT_ROOT, "output", "UVR_output")
+LOADED_AUDIO_DIR = os.path.join(PROJECT_ROOT, "models", "loaded_audio")
 
 OUTPUT_FORMATS = ["wav", "flac", "mp3", "ogg", "m4a"]
 F0_METHODS = ["hpa-rmvpe", "rmvpe", "fcpe", "crepe", "crepe-tiny"]
@@ -93,74 +94,61 @@ def swap_buttons():
     return gr.update(visible=False), gr.update(visible=True)
 
 
+def list_loaded_audio() -> "dict[str, str]":
+    """{отображаемое имя: абсолютный путь} для всех аудио в папке тестов."""
+    from collections import OrderedDict
+
+    found = OrderedDict()
+    if not os.path.isdir(LOADED_AUDIO_DIR):
+        return found
+    for name in sorted(os.listdir(LOADED_AUDIO_DIR), key=natural_key):
+        path = os.path.join(LOADED_AUDIO_DIR, name)
+        if os.path.isfile(path):
+            stem = os.path.splitext(name)[0]
+            label = stem.replace("_", " ").strip() or name
+            found[label] = path
+    return found
+
+
 def conversion_settings():
-    """Аккордеон тонких настроек конвертации (классический вид).
-
-    Возвращает словарь компонентов; ключи соответствуют именованным
-    аргументам `rvc_infer` / `rvc_batch_infer`
-    (кроме модели, входа, тона и формата — они лежат в основной части).
-    """
-    with gr.Accordion("Настройки преобразования", open=True):
+    """Настройки конвертации."""
+    with gr.Accordion("Настройки конвертации", open=True):
         with gr.Column(variant="panel"):
-            with gr.Accordion("Стандартные настройки", open=True):
-                with gr.Group():
-                    with gr.Column(variant="panel"):
-                        f0_method = gr.Dropdown(
-                            value="hpa-rmvpe",
-                            label="Метод выделения тона",
-                            choices=F0_METHODS,
-                        )
-                    with gr.Column(variant="panel"):
-                        index_rate = gr.Slider(
-                            minimum=0,
-                            maximum=1,
-                            step=0.1,
-                            value=0.1,
-                            label="Влияние индекса",
-                            info="Влияние .index файла модели на выходное аудио. Чем выше значение, тем ближе в мелких деталях звучание модели к звучанию датасета, на котором она обучалась, но тем больше артефактов в аудио. [По умолчанию: 0,1]",
-                        )
-                        volume_envelope = gr.Slider(
-                            minimum=0,
-                            maximum=1,
-                            step=0.1,
-                            value=0.5,
-                            label="Баланс громкости",
-                            info="Влияние громкости модели на громкость выходного аудио. Чем выше значение, тем ближе к оригинальной громкости модели, чем ниже - тем ближе к громкости входного аудио. [По умолчанию: 0,5]",
-                        )
-                        protect = gr.Slider(
-                            minimum=0,
-                            maximum=0.5,
-                            step=0.05,
-                            value=0.4,
-                            label="Защита согласных",
-                            info="Защита согласных и звуков дыхания, во избежание артефактов. Может влиять на акцент модели. Значение 0,5 - полная защита. [По умолчанию: 0,4]",
-                        )
-
-            with gr.Accordion("Дополнительные настройки", open=False):
-                with gr.Group():
-                    with gr.Row(variant="panel"):
-                        f0_min = gr.Slider(
-                            minimum=61,
-                            maximum=131,
-                            step=1,
-                            value=61,
-                            label="Минимальный диапазон тона",
-                            info="Определяет нижнюю границу диапазона тона в герцах, который алгоритм будет использовать для определения основной частоты (F0) в аудиосигнале. [По умолчанию: 61 (Нота B1 - 61.735 Гц)]",
-                        )
-                        f0_max = gr.Slider(
-                            minimum=261,
-                            maximum=2218,
-                            step=1,
-                            value=2218,
-                            label="Максимальный диапазон тона",
-                            info="Определяет верхнюю границу диапазона тона в герцах, который алгоритм будет использовать для определения основной частоты (F0) в аудиосигнале. [По умолчанию: 2218 (Нота C#7 - 2217.5 Гц)]",
-                        )
-
-            return {
-                "f0_method": f0_method,
-                "index_rate": index_rate,
-                "protect": protect,
-                "volume_envelope": volume_envelope,
-                "f0_min": f0_min,
-                "f0_max": f0_max,
-            }
+            with gr.Group():
+                with gr.Column(variant="panel"):
+                    f0_method = gr.Dropdown(
+                        value="hpa-rmvpe",
+                        label="Метод выделения тона",
+                        choices=F0_METHODS,
+                    )
+                with gr.Column(variant="panel"):
+                    index_rate = gr.Slider(
+                        minimum=0,
+                        maximum=1,
+                        step=0.1,
+                        value=0.1,
+                        label="Влияние индекса",
+                        info="Влияние .index файла модели на выходное аудио. Чем выше значение, тем ближе в мелких деталях звучание модели к звучанию датасета, на котором она обучалась, но тем больше артефактов в аудио. [По умолчанию: 0,1]",
+                    )
+                    volume_envelope = gr.Slider(
+                        minimum=0,
+                        maximum=1,
+                        step=0.05,
+                        value=0.5,
+                        label="Баланс громкости",
+                        info="Влияние громкости модели на громкость выходного аудио. Чем выше значение, тем ближе к оригинальной громкости модели, чем ниже - тем ближе к громкости входного аудио. [По умолчанию: 0,5]",
+                    )
+                    protect = gr.Slider(
+                        minimum=0,
+                        maximum=0.5,
+                        step=0.05,
+                        value=0.4,
+                        label="Защита согласных",
+                        info="Защита согласных и звуков дыхания, во избежание артефактов. Может влиять на акцент модели. Значение 0,5 - полная защита. [По умолчанию: 0,4]",
+                    )
+    return {
+        "f0_method": f0_method,
+        "index_rate": index_rate,
+        "protect": protect,
+        "volume_envelope": volume_envelope,
+    }

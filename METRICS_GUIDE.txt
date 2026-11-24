@@ -1,4 +1,4 @@
-ИНТЕРПРЕТАЦИЯ МЕТРИК MistRVC (v0.8.8, HiFi-GAN NSF)
+ИНТЕРПРЕТАЦИЯ МЕТРИК MistRVC (v0.9.0, HiFi-GAN NSF)
 
 Источник истины: rvc/training/train.py (+ losses.py, mel_processing.py,
 visualization.py, utils/probe.py, utils/data_utils.py, configs/*.json).
@@ -76,7 +76,7 @@ visualization.py, utils/probe.py, utils/data_utils.py, configs/*.json).
   ничего не теряет. Раскладка пишется в meta.json (eval_spk) и в строку
   "Проверочный набор" журнала ("по спикерам: ...").
 - holdout: квоты+margin ИЗЫМАЮТСЯ из обучения (size + до 2 соседей на блок);
-  требует N>=40 и остаток >=2*batch, иначе fallback на fixed. fixed: зонд
+  требует N>=120 и остаток >=2*batch, иначе fallback на fixed. fixed: зонд
   остаётся в обучении.
 - Новый выбор применяется только при пересборке зонда (новая модель или
   изменённый filelist); зафиксированные наборы не меняются.

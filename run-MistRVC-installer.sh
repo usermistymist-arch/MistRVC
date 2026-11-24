@@ -2,6 +2,15 @@
 # MistRVC installer for Linux and macOS.
 set -euo pipefail
 
+# Не закрывать окно до нажатия Enter — при успехе и при любой ошибке.
+wait_for_key() {
+    printf '\nPress Enter to close...'
+    read -r </dev/tty 2>/dev/null || true
+}
+trap wait_for_key EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+
 PYTHON_VERSION="3.11"
 
 OS_NAME="$(uname)"

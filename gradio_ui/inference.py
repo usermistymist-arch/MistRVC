@@ -7,9 +7,11 @@ from datetime import datetime
 import gradio as gr
 
 from gradio_ui.common import (
+    LOADED_AUDIO_DIR,
     OUTPUT_FORMATS,
     RVC_OUTPUT_DIR,
     conversion_settings,
+    list_loaded_audio,
     model_select,
     pitch_slider,
     process_file_upload,
@@ -73,8 +75,6 @@ def _convert(
     index_rate,
     protect,
     volume_envelope,
-    f0_min,
-    f0_max,
     speaker_id,
     progress=gr.Progress(track_tqdm=True),
 ):
@@ -106,8 +106,6 @@ def _convert(
         rvc_model=rvc_model,
         input_path=input_path,
         f0_method=f0_method,
-        f0_min=f0_min,
-        f0_max=f0_max,
         rvc_pitch=rvc_pitch,
         protect=protect,
         index_rate=index_rate,
@@ -130,8 +128,6 @@ def _convert_batch(
     index_rate,
     protect,
     volume_envelope,
-    f0_min,
-    f0_max,
     speaker_id,
     progress=gr.Progress(track_tqdm=True),
 ):
@@ -166,8 +162,6 @@ def _convert_batch(
         files=files,
         output_dir=output_dir,
         f0_method=f0_method,
-        f0_min=f0_min,
-        f0_max=f0_max,
         rvc_pitch=rvc_pitch,
         protect=protect,
         index_rate=index_rate,
@@ -186,6 +180,31 @@ def _convert_batch(
     if not results:
         raise gr.Error(summary)
     return results
+
+
+def _save_loaded_audio(file_path):
+    """Копирует загруженное аудио в папку тестов и обновляет dropdown."""
+    if not file_path or not os.path.isfile(file_path):
+        return gr.update(choices=list(list_loaded_audio().keys()))
+
+    os.makedirs(LOADED_AUDIO_DIR, exist_ok=True)
+    filename = os.path.basename(file_path)
+    dest = os.path.join(LOADED_AUDIO_DIR, filename)
+    try:
+        import shutil
+
+        shutil.copy2(file_path, dest)
+    except Exception:
+        pass  # Ошибка копирования не критична
+    return gr.update(choices=list(list_loaded_audio().keys()))
+
+
+def _pick_loaded_audio(label):
+    """Возвращает путь по выбранному имени в dropdown."""
+    if not label:
+        return ""
+    loaded_audios = list_loaded_audio()
+    return loaded_audios.get(label, "")
 
 
 def _single_conversion_tab():
@@ -221,13 +240,22 @@ def _single_conversion_tab():
                     label="Путь к файлу:",
                     info="Введите полный путь к файлу.",
                 )
+                loaded_audio_dropdown = gr.Dropdown(
+                    label="Ранее загруженные",
+                    info="Аудиофайлы, ранее загруженные в этой сессии.",
+                    choices=list(list_loaded_audio().keys()),
+                    value=None,
+                    allow_custom_value=False,
+                )
 
             with gr.Column():
                 show_upload_button = gr.Button(
                     value="Загрузить файл с устройства",
                     visible=False,
                 )
-                show_enter_button = gr.Button(value="Ввести путь к файлу")
+                show_enter_button = gr.Button(
+                    value="Ввести путь или выбрать из ранее загруженных"
+                )
 
     with gr.Group(), gr.Row(equal_height=True):
         generate_btn = gr.Button(
@@ -254,6 +282,18 @@ def _single_conversion_tab():
         process_file_upload,
         inputs=local_file,
         outputs=[song_input, local_file],
+        api_name=False,
+    )
+    local_file.change(
+        _save_loaded_audio,
+        inputs=local_file,
+        outputs=[loaded_audio_dropdown],
+        api_name=False,
+    )
+    loaded_audio_dropdown.change(
+        _pick_loaded_audio,
+        inputs=[loaded_audio_dropdown],
+        outputs=[song_input],
         api_name=False,
     )
 
@@ -289,8 +329,6 @@ def _single_conversion_tab():
             settings["index_rate"],
             settings["protect"],
             settings["volume_envelope"],
-            settings["f0_min"],
-            settings["f0_max"],
             speaker_id,
         ],
         outputs=[converted_voice],
@@ -364,8 +402,6 @@ def _batch_conversion_tab():
             settings["index_rate"],
             settings["protect"],
             settings["volume_envelope"],
-            settings["f0_min"],
-            settings["f0_max"],
             speaker_id,
         ],
         outputs=[batch_result],

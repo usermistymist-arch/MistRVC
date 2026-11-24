@@ -69,7 +69,7 @@ set "FORCE_CREATE=--force"
 :create_conda_env_new
 echo Creating Python environment (Python %PYTHON_VERSION%)...
 call "%MINICONDA_DIR%\_conda.exe" create --no-shortcuts -y -k --prefix "%ENV_DIR%" python=%PYTHON_VERSION% !FORCE_CREATE!
-if errorlevel 1 goto :error
+if errorlevel 1 exit /b 1
 echo Environment created.
 echo.
 exit /b 0
@@ -86,7 +86,7 @@ if not "!NVIDIA_GPUS!"=="0" set "TORCH_BACKEND=cu128"
 echo  PyTorch: %TORCH_BACKEND%
 
 "%ENV_DIR%\python.exe" -m pip install --upgrade pip setuptools
-if errorlevel 1 goto :error
+if errorlevel 1 exit /b 1
 
 if /i "%TORCH_BACKEND%"=="cpu" (
     echo Installing PyTorch (CPU)...
@@ -95,13 +95,13 @@ if /i "%TORCH_BACKEND%"=="cpu" (
     echo Installing PyTorch (CUDA)...
     "%ENV_DIR%\python.exe" -m pip install torch==2.11 torchaudio==2.11 --index-url https://download.pytorch.org/whl/cu128
 )
-if errorlevel 1 goto :error
+if errorlevel 1 exit /b 1
 
 "%ENV_DIR%\python.exe" -m pip install torchcodec==0.11
-if errorlevel 1 goto :error
+if errorlevel 1 exit /b 1
 
 "%ENV_DIR%\python.exe" -m pip install -r "%PRINCIPAL%\requirements.txt"
-if errorlevel 1 goto :error
+if errorlevel 1 exit /b 1
 
 echo Dependencies installed.
 echo.
@@ -154,18 +154,17 @@ exit /b 0
 echo.
 echo Could not import some packages.
 echo Run the installer again.
-pause
 exit /b 1
 
 :download_error
 echo.
 echo Download failed. Check your internet connection and try again.
-goto :error
+exit /b 1
 
 :install_error
 echo.
 echo Could not install Miniconda.
-goto :error
+exit /b 1
 
 :error
 echo.

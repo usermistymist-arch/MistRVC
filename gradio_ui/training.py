@@ -23,7 +23,7 @@ from assets.model_installer import (
 )
 from assets.pretrains import NO_PRETRAIN, default_pretrain, pretrain_choices
 from gradio_ui.jobs import command, request_stop, run_job
-from rvc.training.utils.probe import MODE_NAMES, locked_probe
+from rvc.training.utils.probe import MODE_NAMES, locked_probe, read_meta, update_meta
 
 SAMPLE_RATES = [32000, 40000, 48000]
 DEFAULT_GPUS = "0"
@@ -42,7 +42,7 @@ PROBE_INFO = (
     "Стабильные графики, датасет не уменьшается. "
     "Исключённые данные: постоянный набор, исключённый из данных для обучения, "
     "без mute-файлов. Стабильные графики, датасет уменьшается, но видно: "
-    "модель учится или запоминает датасет. Для датасетов от 40 сегментов, когда "
+    "модель учится или запоминает датасет. Для датасетов от 120 сегментов, когда "
     "часть данных не жалко отдать. Сегменты распределяются по спикерам "
     "пропорционально их объёму данных."
 )
@@ -322,6 +322,204 @@ def _probe_state(model_name):
     )
 
 
+def _load_training_params(model_name: str) -> dict:
+    """Читает параметры последнего запуска обучения из data/meta.json.
+
+    Возвращает словарь с ключами: sample_rate, segment_len, f0_method,
+    include_mutes, normalize, total_epoch, save_every_epoch, batch_size,
+    save_to_zip, save_half, d_lr_multiplier, d_grad_max_norm,
+    d_label_smoothing, deterministic, pretrain, pretrain_g, pretrain_d.
+    Отсутствующие ключи не включаются.
+    """
+    name = (model_name or "").strip()
+    if not name:
+        return {}
+    exp_dir = _exp_dir(name)
+    if not os.path.isdir(exp_dir):
+        return {}
+
+    params = {}
+
+    # Из config.json: sample_rate
+    config_path = os.path.join(exp_dir, "data", "config.json")
+    if os.path.isfile(config_path):
+        try:
+            with open(config_path, encoding="utf-8") as file:
+                config = json.load(file)
+            rate = config.get("data", {}).get("sample_rate")
+            if rate:
+                params["sample_rate"] = int(rate)
+        except (OSError, ValueError, TypeError):
+            pass
+
+    # Из meta.json: dataset (segment_len) и last_run
+    meta = read_meta(exp_dir)
+    dataset = meta.get("dataset") or {}
+    if "segment_sec" in dataset:
+        try:
+            params["segment_len"] = float(dataset["segment_sec"])
+        except (TypeError, ValueError):
+            pass
+
+    last_run = meta.get("last_run") or {}
+    for key in (
+        "f0_method",
+        "include_mutes",
+        "normalize",
+        "total_epoch",
+        "save_every_epoch",
+        "batch_size",
+        "save_to_zip",
+        "save_half",
+        "d_lr_multiplier",
+        "d_grad_max_norm",
+        "d_label_smoothing",
+        "deterministic",
+        "pretrain",
+        "pretrain_g",
+        "pretrain_d",
+    ):
+        if key in last_run:
+            params[key] = last_run[key]
+
+    return params
+
+
+def _restore_training_params(
+    model_name,
+    sample_rate_current,
+    segment_len_current,
+    f0_method_current,
+    include_mutes_current,
+    normalize_current,
+    total_epoch_current,
+    save_every_epoch_current,
+    batch_size_current,
+    pretrain_current,
+    pretrain_g_current,
+    pretrain_d_current,
+    save_to_zip_current,
+    save_half_current,
+    d_lr_multiplier_current,
+    d_grad_max_norm_current,
+    d_label_smoothing_current,
+    deterministic_current,
+):
+    """Подставляет параметры последнего запуска для существующей модели.
+
+    Возвращает gr.update для всех полей. Для несуществующих моделей —
+    возвращает gr.update без изменений (или с дефолтами для частоты/сегмента).
+    """
+    name = (model_name or "").strip()
+    if not name:
+        return (gr.update(open=True),) + (gr.update(),) * 17
+
+    exp_dir = _exp_dir(name)
+    if not os.path.isdir(exp_dir):
+        return (gr.update(open=True),) + (gr.update(),) * 17
+
+    params = _load_training_params(name)
+    if not params:
+        # Модель существует, но обучения ещё не было — сворачиваем аккордеон
+        return (gr.update(open=False),) + (gr.update(),) * 17
+
+    # sample_rate: если зафиксирована в config.json — подставляем
+    sample_rate = gr.update()
+    pretrain_update = gr.update(value=params.get("pretrain", pretrain_current))
+    if "sample_rate" in params:
+        rate = params["sample_rate"]
+        if rate in SAMPLE_RATES:
+            sample_rate = gr.update(value=rate)
+            # Программная установка частоты не вызывает sample_rate.change,
+            # поэтому choices претрейнов обновляем здесь же, одним gr.update.
+            choices = pretrain_choices(rate)
+            value = params.get("pretrain", pretrain_current)
+            if value not in choices:
+                value = default_pretrain(rate)
+            pretrain_update = gr.update(choices=choices, value=value)
+
+    # Остальные параметры: подставляем из last_run, если есть
+    updates = [
+        gr.update(
+            open=False
+        ),  # data_accordion — ВСЕГДА сворачиваем для существующей модели
+        sample_rate,
+        gr.update(value=params.get("segment_len", segment_len_current)),
+        gr.update(value=params.get("f0_method", f0_method_current)),
+        gr.update(value=params.get("include_mutes", include_mutes_current)),
+        gr.update(value=params.get("normalize", normalize_current)),
+        gr.update(value=params.get("total_epoch", total_epoch_current)),
+        gr.update(value=params.get("save_every_epoch", save_every_epoch_current)),
+        gr.update(value=params.get("batch_size", batch_size_current)),
+        pretrain_update,
+        gr.update(value=params.get("pretrain_g", pretrain_g_current)),
+        gr.update(value=params.get("pretrain_d", pretrain_d_current)),
+        gr.update(value=params.get("save_to_zip", save_to_zip_current)),
+        gr.update(value=params.get("save_half", save_half_current)),
+        gr.update(value=params.get("d_lr_multiplier", d_lr_multiplier_current)),
+        gr.update(value=params.get("d_grad_max_norm", d_grad_max_norm_current)),
+        gr.update(value=params.get("d_label_smoothing", d_label_smoothing_current)),
+        gr.update(value=params.get("deterministic", deterministic_current)),
+    ]
+    return tuple(updates)
+
+
+def _save_training_params(
+    model_name,
+    sample_rate,
+    segment_len,
+    f0_method,
+    include_mutes,
+    normalize,
+    total_epoch,
+    save_every_epoch,
+    batch_size,
+    pretrain,
+    pretrain_g,
+    pretrain_d,
+    save_to_zip,
+    save_half,
+    d_lr_multiplier,
+    d_grad_max_norm,
+    d_label_smoothing,
+    deterministic,
+):
+    """Сохраняет параметры запуска обучения в data/meta.json."""
+    name = (model_name or "").strip()
+    if not name:
+        return
+    exp_dir = _exp_dir(name)
+    if not os.path.isdir(exp_dir):
+        return
+
+    last_run = {
+        "f0_method": str(f0_method),
+        "include_mutes": int(include_mutes),
+        "normalize": bool(normalize),
+        "total_epoch": int(total_epoch),
+        "save_every_epoch": int(save_every_epoch),
+        "batch_size": int(batch_size),
+        "save_to_zip": bool(save_to_zip),
+        "save_half": bool(save_half),
+        "d_lr_multiplier": float(d_lr_multiplier),
+        "d_grad_max_norm": float(d_grad_max_norm),
+        "d_label_smoothing": float(d_label_smoothing),
+        "deterministic": bool(deterministic),
+    }
+
+    # Претрейны: сохраняем только если это локальные файлы (не URL)
+    pretrain_g_str = (pretrain_g or "").strip()
+    pretrain_d_str = (pretrain_d or "").strip()
+    if pretrain_g_str and not pretrain_g_str.startswith(("http://", "https://")):
+        last_run["pretrain_g"] = pretrain_g_str
+    if pretrain_d_str and not pretrain_d_str.startswith(("http://", "https://")):
+        last_run["pretrain_d"] = pretrain_d_str
+    if pretrain:
+        last_run["pretrain"] = pretrain
+
+    update_meta(exp_dir, last_run=last_run)
+
+
 def _probe_on_start(model_name, probe, probe_size):
     """Блокирует поля набора в момент нажатия кнопки, до конца обучения."""
     name = (model_name or "").strip()
@@ -386,6 +584,9 @@ def _resolve_pretrains(pretrain, pretrain_g, pretrain_d, sample_rate, exp_dir):
     Свои файлы имеют приоритет над встроенным набором. При продолжении
     обучения с чекпоинта претрейны не нужны — скачивание пропускается.
     """
+    if os.path.isfile(os.path.join(exp_dir, "checkpoint.pth")):
+        yield "• Найден checkpoint.pth — обучение продолжится, претрейны не нужны."
+        return None, None
     manual_g = (pretrain_g or "").strip()
     manual_d = (pretrain_d or "").strip()
     if manual_g or manual_d:
@@ -395,9 +596,6 @@ def _resolve_pretrains(pretrain, pretrain_g, pretrain_d, sample_rate, exp_dir):
         resolved_d = yield from _prepare_manual_pretrain("D", manual_d)
         yield f"• Свои претрейны: {os.path.basename(resolved_g)}, {os.path.basename(resolved_d)}"
         return resolved_g, resolved_d
-    if os.path.isfile(os.path.join(exp_dir, "checkpoint.pth")):
-        yield "• Найден checkpoint.pth — обучение продолжится, претрейны не нужны."
-        return None, None
     if pretrain == NO_PRETRAIN:
         yield "• Без претрейна: потребуется больше эпох и данных."
         return None, None
@@ -450,10 +648,36 @@ def _train_model(
     deterministic,
     probe,
     probe_size,
+    segment_len,
+    f0_method,
+    include_mutes,
+    normalize,
 ):
     model_name = _require_name(model_name)
     logs_dir = _require_logs_dir()
     exp_dir = _exp_dir(model_name)
+
+    # Сохраняем параметры запуска для автоподстановки при продолжении
+    _save_training_params(
+        model_name,
+        sample_rate,
+        segment_len,
+        f0_method,
+        include_mutes,
+        normalize,
+        total_epoch,
+        save_every_epoch,
+        batch_size,
+        pretrain,
+        pretrain_g,
+        pretrain_d,
+        save_to_zip,
+        save_half,
+        d_lr_multiplier,
+        d_grad_max_norm,
+        d_label_smoothing,
+        deterministic,
+    )
     if not os.path.isfile(os.path.join(exp_dir, "data", "filelist.txt")):
         raise gr.Error(
             "Нет filelist.txt — сначала выполните нарезку и извлечение признаков."
@@ -532,7 +756,7 @@ def training_tab():
     model_name = gr.Textbox(label="Имя модели", placeholder="MyVoice")
 
     with (
-        gr.Accordion("Подготовка данных", open=True),
+        gr.Accordion("Подготовка данных", open=True) as data_accordion,
         gr.Group(),
         gr.Row(equal_height=True),
     ):
@@ -552,10 +776,10 @@ def training_tab():
                 normalize = gr.Checkbox(value=True, label="Нормализация")
             with gr.Row(equal_height=True):
                 segment_len = gr.Slider(
-                    minimum=1.0,
-                    maximum=10.0,
+                    minimum=1.6,
+                    maximum=9.6,
                     step=0.1,
-                    value=3.0,
+                    value=3.1,
                     label="Сегмент (сек)",
                 )
                 include_mutes = gr.Slider(
@@ -574,7 +798,7 @@ def training_tab():
         _section_hint("checkpoint.pth")
         with gr.Row(equal_height=True):
             total_epoch = gr.Slider(
-                minimum=1, maximum=5000, step=1, value=500, label="Всего эпох"
+                minimum=1, maximum=5000, step=1, value=250, label="Всего эпох"
             )
             save_every_epoch = gr.Slider(
                 minimum=1, maximum=200, step=1, value=20, label="Сохранять каждые N"
@@ -670,11 +894,63 @@ def training_tab():
     with gr.Group():
         log = gr.Textbox(label="Журнал", lines=24, max_lines=24)
 
-    step_buttons = [slice_btn, extract_btn, index_btn]
+        step_buttons = [slice_btn, extract_btn, index_btn]
+
+    # 1. Подстановка параметров и сворачивание аккордеона
+    model_name.change(
+        _restore_training_params,
+        inputs=[
+            model_name,
+            sample_rate,
+            segment_len,
+            f0_method,
+            include_mutes,
+            normalize,
+            total_epoch,
+            save_every_epoch,
+            batch_size,
+            pretrain,
+            pretrain_g,
+            pretrain_d,
+            save_to_zip,
+            save_half,
+            d_lr_multiplier,
+            d_grad_max_norm,
+            d_label_smoothing,
+            deterministic,
+        ],
+        outputs=[
+            data_accordion,
+            sample_rate,
+            segment_len,
+            f0_method,
+            include_mutes,
+            normalize,
+            total_epoch,
+            save_every_epoch,
+            batch_size,
+            pretrain,
+            pretrain_g,
+            pretrain_d,
+            save_to_zip,
+            save_half,
+            d_lr_multiplier,
+            d_grad_max_norm,
+            d_label_smoothing,
+            deterministic,
+        ],
+        api_name=False,
+    )
+
+    # 2. Блокировка кнопок шагов 1/2/3, если артефакты уже существуют
     model_name.change(
         _step_states, inputs=model_name, outputs=step_buttons, api_name=False
     )
+
+    # 3. Блокировка сида
     model_name.change(_seed_state, inputs=model_name, outputs=seed, api_name=False)
+
+    # 4. Блокировка проверочного набора
     model_name.change(
         _probe_state, inputs=model_name, outputs=[probe, probe_size], api_name=False
     )
@@ -733,6 +1009,10 @@ def training_tab():
             deterministic,
             probe,
             probe_size,
+            segment_len,
+            f0_method,
+            include_mutes,
+            normalize,
         ],
         outputs=log,
         queue=True,

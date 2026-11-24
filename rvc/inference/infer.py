@@ -3,7 +3,10 @@ import os
 import threading
 
 import gradio as gr
+import numpy as np
 import torch
+from scipy import signal
+from scipy.ndimage import uniform_filter1d
 
 from rvc._library.algorithm.synthesizers import Synthesizer
 from rvc._library.audio import load_audio, save_audio
@@ -41,6 +44,166 @@ os.makedirs(OUTPUT_DIR, exist_ok=True)
 
 # Инициализация конфигурации
 config = Config()
+
+
+def _process_silence(
+    audio: np.ndarray,
+    sample_rate: int,
+    min_duration_sec: float = 2.0,
+    buffer_sec: float = 1.0,
+    threshold_db: float = -60.0,
+) -> tuple[np.ndarray, list[tuple[int, int]]]:
+    """Вырезает середину длительных тишин, оставляя буфер по краям.
+
+    Возвращает:
+        processed_audio: аудио с вырезанными серединами тишин.
+        silence_regions: список кортежей (insert_pos, silence_len) в координатах processed_audio,
+                         указывающих, куда и сколько тишины нужно вставить обратно.
+    """
+    threshold_linear = 10 ** (threshold_db / 20.0)
+    window_size = max(1, int(0.01 * sample_rate))  # 10 мс
+    min_silence_samples = int(min_duration_sec * sample_rate)
+    buffer_samples = int(buffer_sec * sample_rate)
+
+    if len(audio) < window_size:
+        return audio, []
+
+    # Детекция по копии без DC и гула <48 Гц: HPF пайплайна применяется позже,
+    # а здесь низкочастотный мусор иначе удерживал бы RMS выше порога.
+    bh, ah = signal.butter(N=5, Wn=48, btype="high", fs=sample_rate)
+    analysis = signal.filtfilt(bh, ah, audio).astype(np.float64)
+    # uniform_filter1d ведёт скользящую сумму с плавающей точкой: после громких
+    # участков в цифровой тишине остаётся крошечный ОТРИЦАТЕЛЬНЫЙ остаток.
+    # sqrt(отрицательного) = NaN, а NaN < порог = False — тишина не детектировалась.
+    # Поэтому обрезаем снизу нулём ДО sqrt.
+    mean_sq = uniform_filter1d(analysis**2, size=window_size)
+    rms = np.sqrt(np.maximum(mean_sq, 0.0))
+    is_silent = rms < threshold_linear
+
+    # Находим все участки тишины
+    silence_regions_raw = []
+    in_silence = False
+    start_idx = 0
+
+    for i, silent in enumerate(is_silent):
+        if silent and not in_silence:
+            in_silence = True
+            start_idx = i
+        elif not silent and in_silence:
+            in_silence = False
+            end_idx = i
+            if end_idx - start_idx >= min_silence_samples:
+                silence_regions_raw.append((start_idx, end_idx))
+
+    if in_silence and len(is_silent) - start_idx >= min_silence_samples:
+        silence_regions_raw.append((start_idx, len(is_silent)))
+
+    if not silence_regions_raw:
+        return audio, []
+
+    # Центрированное RMS-окно сжимает регион на пол-окна с каждой стороны —
+    # расширяем границы обратно, чтобы якоря таймингов были точными до сэмпла.
+    silence_regions_raw = [
+        (max(0, s - window_size // 2), min(len(audio), e + window_size // 2))
+        for s, e in silence_regions_raw
+    ]
+
+    # Обрабатываем участки: оставляем буфер, вырезаем середину
+    segments = []
+    regions_to_restore = []
+    current_pos = 0
+    processed_len = 0
+
+    for start, end in silence_regions_raw:
+        duration = end - start
+        if duration <= 2 * buffer_samples:
+            continue  # Пауза слишком короткая, чтобы вырезать середину
+
+        # Аудио до начала тишины
+        if start > current_pos:
+            segments.append(audio[current_pos:start])
+            processed_len += start - current_pos
+
+        # Начальный буфер тишины
+        segments.append(audio[start : start + buffer_samples])
+        processed_len += buffer_samples
+
+        # Вырезаемая середина
+        cut_len = duration - 2 * buffer_samples
+        regions_to_restore.append((processed_len, cut_len))
+
+        # Пропускаем вырезанную середину, current_pos сдвигаем на конец буфера
+        current_pos = end - buffer_samples
+
+    # Оставшееся аудио
+    if current_pos < len(audio):
+        segments.append(audio[current_pos:])
+
+    if not segments:
+        return audio, []
+
+    return np.concatenate(segments), regions_to_restore
+
+
+def _restore_silence(
+    audio_opt: np.ndarray,
+    silence_regions: list[tuple[int, int]],
+    processed_len: int,
+    tgt_sr: int,
+    crossfade_ms: float = 10.0,
+) -> np.ndarray:
+    """Вставляет вырезанные середины тишин обратно с кроссфейдом.
+
+    Координаты регионов — сэмплы 16 кГц обработанного аудио. Выход модели имеет
+    частоту tgt_sr, а его длина может отличаться от идеальной на ±окно на каждой
+    внутренней склейке пайплайна, поэтому:
+      * точка вставки берётся по фактическому масштабу len(audio_opt)/processed_len;
+      * длина тишины подбирается так, чтобы её конец попал ровно на идеальную
+        границу оригинала — вокал после каждой паузы начинается в свой тайминг.
+    """
+    if not silence_regions or processed_len <= 0:
+        return audio_opt
+
+    rate = tgt_sr / 16000.0
+    model_len = len(audio_opt)
+    scale = model_len / processed_len
+    cf_samples = max(1, int((crossfade_ms / 1000.0) * tgt_sr))
+
+    result_segments = []
+    model_pos = 0  # курсор по audio_opt
+    inserted = 0  # сколько нулей уже вставлено
+    cut_before = 0  # сумма вырезанных сэмплов (16 кГц) до текущего региона
+    after_zeros = False  # предыдущий шаг вставлял тишину -> нужен fade-in
+
+    for insert_pos, cut_len in silence_regions:
+        m = max(model_pos, min(int(round(insert_pos * scale)), model_len))
+        ideal_end = int(round((insert_pos + cut_before + cut_len) * rate))
+        zeros_len = max(0, ideal_end - m - inserted)
+
+        if m > model_pos:
+            segment = audio_opt[model_pos:m].copy()
+            fade = min(cf_samples, len(segment))
+            segment[-fade:] *= np.linspace(1.0, 0.0, fade)  # fade-out перед тишиной
+            if after_zeros:
+                fi = min(cf_samples, len(segment))
+                segment[:fi] *= np.linspace(0.0, 1.0, fi)  # fade-in после тишины
+            result_segments.append(segment)
+
+        if zeros_len > 0:
+            result_segments.append(np.zeros(zeros_len, dtype=audio_opt.dtype))
+            inserted += zeros_len
+        after_zeros = zeros_len > 0
+
+        model_pos = m
+        cut_before += cut_len
+
+    if model_pos < model_len:
+        segment = audio_opt[model_pos:].copy()
+        fade = min(cf_samples, len(segment))
+        segment[:fade] *= np.linspace(0.0, 1.0, fade)
+        result_segments.append(segment)
+
+    return np.concatenate(result_segments)
 
 
 # Отображает прогресс выполнения задачи.
@@ -297,6 +460,22 @@ def convert_one(
     display_progress(0.4, "Загружаем аудио...", False)
     audio = load_audio(input_path, 16000)
 
+    # --- Обработка тишины ---
+    processed_audio, silence_regions = _process_silence(
+        audio,
+        sample_rate=16000,
+        min_duration_sec=2.0,
+        buffer_sec=1.0,
+        threshold_db=-60.0,
+    )
+    if silence_regions:
+        display_progress(
+            0.45, f"[✂️] Вырезано {len(silence_regions)} участков тишины...", True
+        )
+        audio_to_convert = processed_audio
+    else:
+        audio_to_convert = audio
+
     display_progress(
         0.5, f"[🌌] Преобразуем аудио '{os.path.basename(input_path)}'...", True
     )
@@ -304,7 +483,7 @@ def convert_one(
         model=pipe["embedder"],
         net_g=pipe["net_g"],
         sid=speaker_id,
-        audio=audio,
+        audio=audio_to_convert,
         pitch=rvc_pitch,
         f0_min=f0_min,
         f0_max=f0_max,
@@ -314,6 +493,17 @@ def convert_one(
         volume_envelope=volume_envelope,
         protect=protect,
     )
+
+    # --- Возврат тишины ---
+    if silence_regions:
+        display_progress(0.75, "[↩️] Возвращаем тишину...", True)
+        audio_opt = _restore_silence(
+            audio_opt,
+            silence_regions,
+            len(processed_audio),
+            pipe["tgt_sr"],
+            crossfade_ms=10.0,
+        )
 
     display_progress(0.8, "[💫] Сохраняем результат...", True)
     save_audio(audio_opt, pipe["tgt_sr"], output_path, output_format)

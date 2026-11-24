@@ -54,10 +54,10 @@ if "%INTERNET_AVAILABLE%"=="0" (
 )
 
 set "APP_EXIT_CODE=!errorlevel!"
-if errorlevel 1 goto :application_error
-exit /b 0
-
-:application_error
-echo Error: the application failed to start (exit code !APP_EXIT_CODE!).
+if not "!APP_EXIT_CODE!"=="0" (
+    echo.
+    echo Error: the application failed to start (exit code !APP_EXIT_CODE!).
+)
+echo.
 pause
-exit /b 1
+exit /b !APP_EXIT_CODE!

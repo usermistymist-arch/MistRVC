@@ -27,6 +27,7 @@ venv/
 *.flac
 *.aiff
 !**/mute/**
+models/loaded_audio/
 
 # Прочее
 *.zip

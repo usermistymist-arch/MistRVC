@@ -2,6 +2,15 @@
 # Launch MistRVC (Linux/macOS). Requires ./run-MistRVC-installer.sh.
 set -euo pipefail
 
+# Не закрывать окно до нажатия Enter — при успехе и при любой ошибке.
+wait_for_key() {
+    printf '\nPress Enter to close...'
+    read -r </dev/tty 2>/dev/null || true
+}
+trap wait_for_key EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+
 cd "$(dirname "$0")"
 
 ENV_PYTHON="env/bin/python"
@@ -28,10 +37,10 @@ running_interface() {
     echo "Starting the interface..."
     if [ "$INTERNET_AVAILABLE" -eq 1 ]; then
         echo "Running in ONLINE mode..."
-        exec "$ENV_PYTHON" app.py "$@"
+        "$ENV_PYTHON" app.py "$@"
     else
         echo "Running in OFFLINE mode..."
-        exec "$ENV_PYTHON" app.py --offline "$@"
+        "$ENV_PYTHON" app.py --offline "$@"
     fi
 }
 
