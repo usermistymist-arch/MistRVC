@@ -67,6 +67,7 @@ echo.
 set "FORCE_CREATE=--force"
 
 :create_conda_env_new
+if exist "%ENV_DIR%" set "FORCE_CREATE=--force"
 echo Creating Python environment (Python %PYTHON_VERSION%)...
 call "%MINICONDA_DIR%\_conda.exe" create --no-shortcuts -y -k --prefix "%ENV_DIR%" python=%PYTHON_VERSION% !FORCE_CREATE!
 if errorlevel 1 exit /b 1
@@ -90,14 +91,11 @@ if errorlevel 1 exit /b 1
 
 if /i "%TORCH_BACKEND%"=="cpu" (
     echo Installing PyTorch (CPU)...
-    "%ENV_DIR%\python.exe" -m pip install torch==2.11 torchaudio==2.11
+    "%ENV_DIR%\python.exe" -m pip install torch==2.11 torchaudio==2.11 torchcodec==0.11 --index-url https://download.pytorch.org/whl/cpu
 ) else (
     echo Installing PyTorch (CUDA)...
-    "%ENV_DIR%\python.exe" -m pip install torch==2.11 torchaudio==2.11 --index-url https://download.pytorch.org/whl/cu128
+    "%ENV_DIR%\python.exe" -m pip install torch==2.11 torchaudio==2.11 torchcodec==0.11 --index-url https://download.pytorch.org/whl/cu128
 )
-if errorlevel 1 exit /b 1
-
-"%ENV_DIR%\python.exe" -m pip install torchcodec==0.11
 if errorlevel 1 exit /b 1
 
 "%ENV_DIR%\python.exe" -m pip install -r "%PRINCIPAL%\requirements.txt"
@@ -131,7 +129,7 @@ exit /b 0
 :verify_installation
 cls
 echo Checking the installation...
-"%ENV_DIR%\python.exe" -c "import torch, numpy, scipy, sklearn, librosa, soundfile, gradio, faiss, omegaconf, gdown; from FlashSR.FlashSR import FlashSR; from TorchJaekwon.Util.UtilAudio import UtilAudio"
+"%ENV_DIR%\python.exe" -c "import torch, torchaudio, torchcodec, numpy, scipy, sklearn, librosa, soundfile, gradio, faiss, omegaconf, gdown"
 if errorlevel 1 goto :verify_error
 echo All packages are available.
 echo.

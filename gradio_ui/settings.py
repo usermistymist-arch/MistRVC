@@ -22,11 +22,10 @@ SETTINGS_FILE = os.path.join(SETTINGS_DIR, "settings.json")
 # Дефолтные настройки
 DEFAULT_SETTINGS = {
     "theme_color": "teal",
-    "infer_name_template": "{PITCH_SHIFT}{ }{NAME} - {MODEL}{_}{SPEAKER}",
+    "infer_name_template": "{PITCH_SHIFT}{ }{AUDIO_NAME} - {MODEL}{_}{SPEAKER}",
 }
 
 # Список поддерживаемых цветов Gradio (отображаемое имя, внутреннее значение)
-# Задача 5 выполнена здесь: "Серый" -> "Металлический", "Нейтральный" -> "Серый"
 AVAILABLE_COLORS = [
     ("Индиго", "indigo"),
     ("Синий", "blue"),
@@ -76,6 +75,40 @@ def update_filename_template(template: str):
     with open(SETTINGS_FILE, "w", encoding="utf-8") as f:
         json.dump(settings, f, ensure_ascii=False, indent=2)
     return f"Шаблон сохранён: '{template}'"
+
+
+def filename_template_accordion():
+    """Аккордеон «Имена файлов» под настройками конвертации.
+
+    Вызывается из common.conversion_settings(), поэтому появляется и в одиночной,
+    и в пакетной подвкладке. Значение перечитывается при каждом раскрытии.
+    """
+    settings = load_settings()
+    current_template = settings.get(
+        "infer_name_template", DEFAULT_SETTINGS["infer_name_template"]
+    )
+    with gr.Accordion("Имена файлов", open=True) as accordion:
+        template_input = gr.Textbox(
+            label="Шаблон имени файла",
+            value=current_template,
+            info="Доступные ключи: "
+            "`{PITCH_SHIFT}`, `{AUDIO_NAME}`, `{MODEL}`, `{SPEAKER}`. "
+            "Опциональные разделители: `{ }` (пробел) и `{_}` (нижнее подчёркивание) — "
+            "если после подстановки оказались по краям имени — убираются. "
+            "Сохраняется нажатием кнопки конвертации. "
+            "Пример: {PITCH_SHIFT}{ }{AUDIO_NAME} - {MODEL}{_}{SPEAKER}.",
+        )
+
+    def _reload_template():
+        fresh = load_settings()
+        return gr.update(
+            value=fresh.get(
+                "infer_name_template", DEFAULT_SETTINGS["infer_name_template"]
+            )
+        )
+
+    accordion.expand(_reload_template, outputs=template_input, api_name=False)
+    return template_input
 
 
 def apply_theme(color):

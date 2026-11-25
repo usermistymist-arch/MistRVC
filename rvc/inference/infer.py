@@ -206,6 +206,70 @@ def _restore_silence(
     return np.concatenate(result_segments)
 
 
+def _noise_gate(
+    audio: np.ndarray,
+    sample_rate: int,
+    threshold_db: float = -60.0,
+    hold_ms: float = 120.0,
+    fade_ms: float = 10.0,
+) -> np.ndarray:
+    """Гейт постобработки: обнуляет участки выхода тише threshold_db (dBFS).
+
+    Детекция — RMS в скользящем окне 20 мс по копии с HPF 48 Гц (как в
+    _process_silence: низкочастотный гул иначе удерживал бы гейт открытым).
+    После последнего громкого участка гейт остаётся открытым ещё hold_ms
+    (вдохи/хвосты), перед первым — pre-roll в одно окно (атаки слов).
+    Переходы сглаживаются линейным фейдом fade_ms против щелчков.
+    Длина сигнала не меняется: гейт только умножает на огибающую 0..1.
+    """
+    window = max(1, int(0.02 * sample_rate))  # 20 мс
+    if len(audio) < window:
+        return audio
+
+    threshold_linear = 10 ** (threshold_db / 20.0)
+    bh, ah = signal.butter(N=5, Wn=48, btype="high", fs=sample_rate)
+    analysis = signal.filtfilt(bh, ah, audio).astype(np.float64)
+    # Как в _process_silence: скользящая сумма может дать крошечный отрицательный
+    # остаток -> обрезаем нулём ДО sqrt, иначе NaN не пройдёт сравнение с порогом.
+    mean_sq = uniform_filter1d(analysis**2, size=window)
+    rms = np.sqrt(np.maximum(mean_sq, 0.0))
+    is_open = rms >= threshold_linear
+
+    if not is_open.any():
+        return np.zeros_like(audio)
+    if is_open.all():
+        return audio
+
+    # Границы открытых участков: расширяем влево на окно (pre-roll) и
+    # вправо на hold_ms, затем сливаем перекрывшиеся интервалы.
+    pre = window
+    hold = max(1, int(hold_ms / 1000.0 * sample_rate))
+    edges = np.diff(np.concatenate(([False], is_open, [False])).astype(np.int8))
+    starts = np.maximum(np.flatnonzero(edges == 1) - pre, 0)
+    ends = np.minimum(np.flatnonzero(edges == -1) + hold, len(audio))
+    merged: list[list[int]] = []
+    for s, e in zip(starts, ends):
+        if merged and s <= merged[-1][1]:
+            merged[-1][1] = max(merged[-1][1], int(e))
+        else:
+            merged.append([int(s), int(e)])
+
+    gain = np.zeros(len(audio), dtype=np.float32)
+    for s, e in merged:
+        gain[s:e] = 1.0
+
+    # Линейные фейды на границах: скользящее среднее шириной fade_ms.
+    k = max(1, int(fade_ms / 1000.0 * sample_rate))
+    if k > 1:
+        left = k // 2
+        right = k - 1 - left
+        padded = np.pad(gain, (left, right), mode="edge")
+        csum = np.concatenate(([0.0], np.cumsum(padded, dtype=np.float64)))
+        gain = ((csum[k:] - csum[:-k]) / k).astype(np.float32)
+
+    return audio * gain
+
+
 # Отображает прогресс выполнения задачи.
 def display_progress(percent, message, is_print, progress=gr.Progress()):
     if is_print:
@@ -309,7 +373,7 @@ def build_output_path(
     rvc_model,
     output_format,
     speaker_name=None,
-    filename_template="{PITCH_SHIFT}{ }{NAME} - {MODEL}{_}{SPEAKER}",
+    filename_template="{PITCH_SHIFT}{ }{AUDIO_NAME} - {MODEL}{_}{SPEAKER}",
     rvc_pitch=0,
 ):
     base_name = os.path.splitext(os.path.basename(input_path))[0]
@@ -324,7 +388,7 @@ def build_output_path(
         sign = PLUS_SIGN if rvc_pitch > 0 else "-"
         pitch_shift_str = f"{sign}{abs(rvc_pitch):g}"
     filename = (
-        filename_template.replace("{NAME}", base_name)
+        filename_template.replace("{AUDIO_NAME}", base_name)
         .replace("{MODEL}", rvc_model)
         .replace("{SPEAKER}", speaker_str)
         .replace("{PITCH_SHIFT}", pitch_shift_str)
@@ -426,7 +490,7 @@ def get_pipeline(rvc_model):
 
 
 def release_pipeline():
-    """Выгружает кэш инференса; нужна перед обучением, UVR и апскейлом.
+    """Выгружает кэш инференса; нужна перед обучением и UVR.
 
     Возвращает имя выгруженной модели или None, если память уже свободна.
     """
@@ -447,14 +511,14 @@ def convert_one(
     pipe,
     input_path,
     output_path,
-    f0_method="rmvpe",
+    f0_method="hpa-rmvpe",
     f0_min=61,
     f0_max=2218,
     rvc_pitch=0,
-    protect=0.5,
-    index_rate=0.25,
-    volume_envelope=1.0,
-    output_format="wav",
+    protect=0.4,
+    index_rate=0.1,
+    volume_envelope=0.5,
+    output_format="flac",
     speaker_id=0,
 ):
     display_progress(0.4, "Загружаем аудио...", False)
@@ -505,6 +569,10 @@ def convert_one(
             crossfade_ms=10.0,
         )
 
+    # Гейт постобработки: всё, что тише -60 dBFS, обнуляется перед записью,
+    # поэтому пользователь скачивает уже очищенный файл (длина не меняется).
+    audio_opt = _noise_gate(audio_opt, pipe["tgt_sr"])
+
     display_progress(0.8, "[💫] Сохраняем результат...", True)
     save_audio(audio_opt, pipe["tgt_sr"], output_path, output_format)
     return output_path
@@ -514,17 +582,17 @@ def convert_one(
 def rvc_infer(
     rvc_model=None,
     input_path=None,
-    f0_method="rmvpe",
+    f0_method="hpa-rmvpe",
     f0_min=61,
     f0_max=2218,
     rvc_pitch=0,
-    protect=0.5,
-    index_rate=0.25,
-    volume_envelope=1.0,
-    output_format="wav",
+    protect=0.4,
+    index_rate=0.1,
+    volume_envelope=0.5,
+    output_format="flac",
     speaker_id=0,
     speaker_name="",
-    filename_template="{PITCH_SHIFT}{ }{NAME} - {MODEL}{_}{SPEAKER}",
+    filename_template="{PITCH_SHIFT}{ }{AUDIO_NAME} - {MODEL}{_}{SPEAKER}",
     progress=gr.Progress(track_tqdm=True),
 ):
     if not rvc_model:
@@ -591,17 +659,17 @@ def rvc_batch_infer(
     dir_input=None,
     files=None,
     output_dir=None,
-    f0_method="rmvpe",
+    f0_method="hpa-rmvpe",
     f0_min=61,
     f0_max=2218,
     rvc_pitch=0,
-    protect=0.5,
-    index_rate=0.25,
-    volume_envelope=1.0,
-    output_format="wav",
+    protect=0.4,
+    index_rate=0.1,
+    volume_envelope=0.5,
+    output_format="flac",
     speaker_id=0,
     speaker_name="",
-    filename_template="{PITCH_SHIFT}{ }{NAME} - {MODEL}{_}{SPEAKER}",
+    filename_template="{PITCH_SHIFT}{ }{AUDIO_NAME} - {MODEL}{_}{SPEAKER}",
     progress=gr.Progress(track_tqdm=True),
 ):
     if not rvc_model:

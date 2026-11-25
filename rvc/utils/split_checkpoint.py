@@ -77,6 +77,8 @@ def split_checkpoint(checkpoint_path: str, output_dir: str):
     print(f"\nГотово! Эпоха чекпоинта: {epoch}")
     print(f"Файлы сохранены в: {output_dir}")
 
+    return f"Готово! Эпоха чекпоинта: {epoch}\nG: {g_path}\nD: {d_path}"
+
 
 def main():
     parser = argparse.ArgumentParser(

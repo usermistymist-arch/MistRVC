@@ -59,6 +59,22 @@ footer{display:none !important}
 }
 """
 
+SCROLL_TOP_JS = """() => {
+    if ("scrollRestoration" in history) history.scrollRestoration = "manual";
+    let touched = false;
+    const mark = () => { touched = true; };
+    window.addEventListener("pointerdown", mark, { once: true, capture: true });
+    window.addEventListener("keydown", mark, { once: true, capture: true });
+    const toTop = () => {
+        if (touched) return;
+        const ae = document.activeElement;
+        if (ae && ae !== document.body && typeof ae.blur === "function") ae.blur();
+        window.scrollTo(0, 0);
+    };
+    toTop();
+    [50, 150, 400, 900, 1500].forEach((t) => setTimeout(toTop, t));
+}"""
+
 RUN_FROM_JUPYTER_NOTEBOOKS = colab_check() or kaggle_check()
 
 
@@ -101,6 +117,7 @@ theme_color = settings.get("theme_color", DEFAULT_SETTINGS["theme_color"])
 with gr.Blocks(
     title=get_title(),
     css=APP_CSS,
+    js=SCROLL_TOP_JS,
     theme=gr.themes.Soft(
         primary_hue=theme_color,
         secondary_hue="slate",

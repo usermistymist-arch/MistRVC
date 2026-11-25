@@ -1,4 +1,4 @@
-ИНТЕРПРЕТАЦИЯ МЕТРИК MistRVC (v0.9.0, HiFi-GAN NSF)
+ИНТЕРПРЕТАЦИЯ МЕТРИК MistRVC (v0.9.1, HiFi-GAN NSF)
 
 Источник истины: rvc/training/train.py (+ losses.py, mel_processing.py,
 visualization.py, utils/probe.py, utils/data_utils.py, configs/*.json).
@@ -49,12 +49,17 @@ visualization.py, utils/probe.py, utils/data_utils.py, configs/*.json).
   это train-side метрики, одинаковые во всех режимах зонда.
   r->1, g->0 = D уверен; около 0.5/0.5 = баланс.
 - grad/norm_g, grad/norm_d: L2-норма градиентов после backward, до step.
-  norm_d - после клиппинга; grad/norm_d_pre_clip пишется только при
-  d_grad_max_norm>0. Всплески нормальны; NaN/inf = авария.
+  Обе - после клиппинга; grad/norm_d_pre_clip и grad/norm_g_pre_clip
+  пишутся только при d_grad_max_norm>0 и g_grad_max_norm>0 соответственно.
+  Подмодульные нормы G тоже считаются после клиппинга.
+  Всплески нормальны; NaN/inf = авария.
 - grad/norm_dec / enc_p / enc_q / flow / emb_g: L2 по подмодулям G;
   dec доминирует.
-- learning rate/G/D: AdamW: lr = learning_rate * lr_decay^(эпоха-1)
-  (config: learning_rate=1e-4, lr_decay=0.999875); D = base*d_lr_multiplier.
+- learning rate/G/D: AdamW: lr = base * lr_decay^(эпоха-1)
+  (config: learning_rate=1e-4, lr_decay=0.999875);
+  G = learning_rate*g_lr_multiplier, D = learning_rate*d_lr_multiplier.
+  Множители применяются и при продолжении с чекпоинта: initial_lr
+  переопределяется текущими значениями перед созданием scheduler.
   betas=(0.8,0.99) и eps=1e-9 - из config; weight_decay=0.01 - дефолт
   PyTorch AdamW (в коде не передаётся явно), т.е. decoupled weight decay
   активен с коэффициентом 0.01.

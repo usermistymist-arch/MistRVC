@@ -39,7 +39,7 @@ def create_parser():
         "--rvc_model", type=str, required=True, help="Название RVC модели"
     )
     base.add_argument(
-        "--f0_method", type=str, default="rmvpe", help="Метод извлечения F0"
+        "--f0_method", type=str, default="hpa-rmvpe", help="Метод извлечения F0"
     )
     base.add_argument("--f0_min", type=int, default=61, help="Минимальная частота F0")
     base.add_argument(
@@ -48,13 +48,15 @@ def create_parser():
     base.add_argument(
         "--rvc_pitch", type=float, default=0, help="Высота тона RVC модели"
     )
-    base.add_argument("--protect", type=float, default=0.5, help="Защита согласных")
-    base.add_argument("--index_rate", type=float, default=0, help="Коэффициент индекса")
+    base.add_argument("--protect", type=float, default=0.4, help="Защита согласных")
     base.add_argument(
-        "--volume_envelope", type=float, default=1, help="Огибающая громкости"
+        "--index_rate", type=float, default=0.1, help="Коэффициент индекса"
     )
     base.add_argument(
-        "--output_format", type=str, default="mp3", help="Формат выходного файла"
+        "--volume_envelope", type=float, default=0.5, help="Огибающая громкости"
+    )
+    base.add_argument(
+        "--output_format", type=str, default="flac", help="Формат выходного файла"
     )
     base.add_argument(
         "--speaker_id",
@@ -71,8 +73,8 @@ def create_parser():
     base.add_argument(
         "--filename_template",
         type=str,
-        default="{PITCH_SHIFT}{ }{NAME} - {MODEL}{_}{SPEAKER}",
-        help="Шаблон имени выходного файла. Ключи: {NAME}, {MODEL}, {SPEAKER}, {PITCH_SHIFT}; "
+        default="{PITCH_SHIFT}{ }{AUDIO_NAME} - {MODEL}{_}{SPEAKER}",
+        help="Шаблон имени выходного файла. Ключи: {AUDIO_NAME}, {MODEL}, {SPEAKER}, {PITCH_SHIFT}; "
         "опциональные разделители: { } и {_} (убираются, если стоят по краям имени файла)",
     )
 

@@ -143,6 +143,8 @@ def get_hparams():
     parser.add_argument("--d_lr_multiplier", type=float, default=1.0)
     parser.add_argument("--d_grad_max_norm", type=float, default=0.0)
     parser.add_argument("--d_label_smoothing", type=float, default=0.0)
+    parser.add_argument("--g_lr_multiplier", type=float, default=1.0)
+    parser.add_argument("--g_grad_max_norm", type=float, default=0.0)
     parser.add_argument("--seed", type=int, default=None)
     parser.add_argument("--deterministic", action="store_true")
     parser.add_argument(
@@ -219,6 +221,8 @@ def get_hparams():
     hparams.d_lr_multiplier = args.d_lr_multiplier
     hparams.d_grad_max_norm = args.d_grad_max_norm
     hparams.d_label_smoothing = args.d_label_smoothing
+    hparams.g_lr_multiplier = args.g_lr_multiplier
+    hparams.g_grad_max_norm = args.g_grad_max_norm
     hparams.deterministic = args.deterministic
     if args.deterministic:
         os.environ["CUBLAS_WORKSPACE_CONFIG"] = ":4096:8"
@@ -255,6 +259,8 @@ def get_hparams():
     print(f"{'Скорость обучения D:':<30} {hparams.d_lr_multiplier}")
     print(f"{'Потолок градиентов D:':<30} {hparams.d_grad_max_norm}")
     print(f"{'Сглаживание меток D:':<30} {hparams.d_label_smoothing}")
+    print(f"{'Скорость обучения G:':<30} {hparams.g_lr_multiplier}")
+    print(f"{'Потолок градиентов G:':<30} {hparams.g_grad_max_norm}")
     seed_note = ""
     if seed_ignored is not None:
         seed_note = f" — переданный {seed_ignored} отклонён"
@@ -463,7 +469,7 @@ def run(hps, rank, n_gpus, device, device_id):
 
         optim_g = torch.optim.AdamW(
             net_g.parameters(),
-            hps.train.learning_rate,
+            hps.train.learning_rate * hps.g_lr_multiplier,
             betas=hps.train.betas,
             eps=hps.train.eps,
         )
@@ -552,6 +558,16 @@ def run(hps, rank, n_gpus, device, device_id):
                         "model"
                     ]
                 )
+
+        # Множители скорости задаются на каждый запуск. Чекпоинт приносит свои
+        # initial_lr, и без этого смена множителя при продолжении игнорировалась бы:
+        # и пересчёт lr ниже, и ExponentialLR берут базу именно из initial_lr.
+        for optim, multiplier in (
+            (optim_g, hps.g_lr_multiplier),
+            (optim_d, hps.d_lr_multiplier),
+        ):
+            for group in optim.param_groups:
+                group["initial_lr"] = hps.train.learning_rate * multiplier
 
         # Настройка scheduler
         scheduler_g = torch.optim.lr_scheduler.ExponentialLR(
@@ -813,6 +829,14 @@ def train_and_evaluate(
         loss_gen_all = loss_gen + loss_fm + loss_mel + loss_kl
         optim_g.zero_grad()
         loss_gen_all.backward()
+
+        # Gradient clipping G — как у D: clip_grad_norm_ возвращает норму ДО
+        # обрезки, её пишем отдельным тегом, чтобы видеть реальный масштаб.
+        grad_norm_g_pre = None
+        if hps.g_grad_max_norm > 0:
+            grad_norm_g_pre = torch.nn.utils.clip_grad_norm_(
+                net_g.parameters(), max_norm=hps.g_grad_max_norm
+            )
         grad_norm_g = grad_norm(net_g.parameters())
         # Per-component gradient norms
         g_model = net_g.module if hasattr(net_g, "module") else net_g
@@ -846,6 +870,8 @@ def train_and_evaluate(
         # равна grad/norm_d, и дублировать её в графиках незачем.
         if grad_norm_d_pre is not None:
             acc_update_dict["grad/norm_d_pre_clip"] = grad_norm_d_pre
+        if grad_norm_g_pre is not None:
+            acc_update_dict["grad/norm_g_pre_clip"] = grad_norm_g_pre
         # FM группируем по типу входа: S — сырой waveform, P — периодная развёртка.
         fm_groups = {}
         for name, fml in zip(disc_names, fm_per_disc):

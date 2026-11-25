@@ -5,6 +5,8 @@ import re
 
 import gradio as gr
 
+from gradio_ui.settings import filename_template_accordion
+
 # Пути считаются от корня репозитория, а не от текущего каталога: обучение запускается
 # отдельными процессами с cwd = корень проекта (gradio_ui/jobs.py), поэтому интерфейс
 # должен смотреть в те же папки, откуда его ни запустили бы.
@@ -60,7 +62,9 @@ def refresh_models() -> list:
 def model_select() -> gr.Dropdown:
     """Список голосовых моделей; обновляется автоматически (см. `model_dropdowns`)."""
     with gr.Group():
-        model = gr.Dropdown(label="Голосовая модель", choices=list_rvc_models())
+        model = gr.Dropdown(
+            label="Голосовая модель", choices=list_rvc_models(), value=None
+        )
     _MODEL_DROPDOWNS.append(model)
     return model
 
@@ -113,42 +117,41 @@ def list_loaded_audio() -> "dict[str, str]":
 def conversion_settings():
     """Настройки конвертации."""
     with gr.Accordion("Настройки конвертации", open=True):
-        with gr.Column(variant="panel"):
-            with gr.Group():
-                with gr.Column(variant="panel"):
-                    f0_method = gr.Dropdown(
-                        value="hpa-rmvpe",
-                        label="Метод выделения тона",
-                        choices=F0_METHODS,
-                    )
-                with gr.Column(variant="panel"):
-                    index_rate = gr.Slider(
-                        minimum=0,
-                        maximum=1,
-                        step=0.1,
-                        value=0.1,
-                        label="Влияние индекса",
-                        info="Влияние .index файла модели на выходное аудио. Чем выше значение, тем ближе в мелких деталях звучание модели к звучанию датасета, на котором она обучалась, но тем больше артефактов в аудио. [По умолчанию: 0,1]",
-                    )
-                    volume_envelope = gr.Slider(
-                        minimum=0,
-                        maximum=1,
-                        step=0.05,
-                        value=0.5,
-                        label="Баланс громкости",
-                        info="Влияние громкости модели на громкость выходного аудио. Чем выше значение, тем ближе к оригинальной громкости модели, чем ниже - тем ближе к громкости входного аудио. [По умолчанию: 0,5]",
-                    )
-                    protect = gr.Slider(
-                        minimum=0,
-                        maximum=0.5,
-                        step=0.05,
-                        value=0.4,
-                        label="Защита согласных",
-                        info="Защита согласных и звуков дыхания, во избежание артефактов. Может влиять на акцент модели. Значение 0,5 - полная защита. [По умолчанию: 0,4]",
-                    )
+        with gr.Group():
+            f0_method = gr.Dropdown(
+                value="hpa-rmvpe",
+                label="Метод выделения тона",
+                choices=F0_METHODS,
+            )
+            index_rate = gr.Slider(
+                minimum=0,
+                maximum=1,
+                step=0.1,
+                value=0.1,
+                label="Влияние индекса",
+                info="Влияние .index файла модели на выходное аудио. Чем выше значение, тем ближе в мелких деталях звучание модели к звучанию датасета, на котором она обучалась, но тем больше артефактов в аудио. [По умолчанию: 0,1]",
+            )
+            volume_envelope = gr.Slider(
+                minimum=0,
+                maximum=1,
+                step=0.05,
+                value=0.5,
+                label="Баланс громкости",
+                info="Влияние громкости модели на громкость выходного аудио. Чем выше значение, тем ближе к оригинальной громкости модели, чем ниже - тем ближе к громкости входного аудио. [По умолчанию: 0,5]",
+            )
+            protect = gr.Slider(
+                minimum=0,
+                maximum=0.5,
+                step=0.05,
+                value=0.4,
+                label="Защита согласных",
+                info="Защита согласных и звуков дыхания, во избежание артефактов. Может влиять на акцент модели. Значение 0,5 - полная защита. [По умолчанию: 0,4]",
+            )
+    name_template = filename_template_accordion()
     return {
         "f0_method": f0_method,
         "index_rate": index_rate,
         "protect": protect,
         "volume_envelope": volume_envelope,
+        "name_template": name_template,
     }

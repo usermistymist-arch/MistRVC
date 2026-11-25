@@ -18,7 +18,7 @@ from gradio_ui.common import (
     swap_buttons,
     swap_visibility,
 )
-from gradio_ui.settings import DEFAULT_SETTINGS, load_settings, update_filename_template
+from gradio_ui.settings import DEFAULT_SETTINGS, update_filename_template
 
 
 def _get_speaker_update(model_name: str):
@@ -76,14 +76,17 @@ def _convert(
     protect,
     volume_envelope,
     speaker_id,
+    name_template,
     progress=gr.Progress(track_tqdm=True),
 ):
     from rvc.inference.infer import rvc_infer
 
-    settings = load_settings()
-    filename_template = settings.get(
-        "infer_name_template", DEFAULT_SETTINGS["infer_name_template"]
-    )
+    # Шаблон из аккордеона: с каким нажали «Конвертировать» — тот и сохраняем.
+    # Пустой/пробельный шаблон заменяется дефолтным, чтобы не записать пустышку.
+    filename_template = (name_template or "").strip() or DEFAULT_SETTINGS[
+        "infer_name_template"
+    ]
+    update_filename_template(filename_template)
 
     # Преобразуем имя спикера в ID и получаем его текстовое имя
     speaker_id_int = 0
@@ -129,14 +132,16 @@ def _convert_batch(
     protect,
     volume_envelope,
     speaker_id,
+    name_template,
     progress=gr.Progress(track_tqdm=True),
 ):
     from rvc.inference.infer import rvc_batch_infer
 
-    settings = load_settings()
-    filename_template = settings.get(
-        "infer_name_template", DEFAULT_SETTINGS["infer_name_template"]
-    )
+    # Шаблон из аккордеона: с каким нажали «Конвертировать пакет» — тот и сохраняем.
+    filename_template = (name_template or "").strip() or DEFAULT_SETTINGS[
+        "infer_name_template"
+    ]
+    update_filename_template(filename_template)
 
     # Преобразуем имя спикера в ID и получаем его текстовое имя
     speaker_id_int = 0
@@ -259,7 +264,7 @@ def _single_conversion_tab():
 
     with gr.Group(), gr.Row(equal_height=True):
         generate_btn = gr.Button(
-            value="Генерировать",
+            value="Конвертировать",
             variant="primary",
             scale=2,
         )
@@ -330,6 +335,7 @@ def _single_conversion_tab():
             settings["protect"],
             settings["volume_envelope"],
             speaker_id,
+            settings["name_template"],
         ],
         outputs=[converted_voice],
     )
@@ -370,7 +376,7 @@ def _batch_conversion_tab():
 
     with gr.Group(), gr.Row(equal_height=True):
         batch_btn = gr.Button(
-            value="Генерировать пакет",
+            value="Конвертировать пакет",
             variant="primary",
             scale=2,
         )
@@ -403,40 +409,9 @@ def _batch_conversion_tab():
             settings["protect"],
             settings["volume_envelope"],
             speaker_id,
+            settings["name_template"],
         ],
         outputs=[batch_result],
-    )
-
-
-def _conversion_settings_tab():
-    """Подвкладка с настройками, специфичными для конвертации."""
-    settings = load_settings()
-    current_template = settings.get(
-        "infer_name_template", DEFAULT_SETTINGS["infer_name_template"]
-    )
-
-    with gr.Column():
-        gr.Markdown("### Именование файлов")
-        gr.Markdown(
-            "Шаблон имени выходного файла при конвертации. Доступные ключи: "
-            "`{PITCH_SHIFT}`, `{NAME}`, `{MODEL}`, `{SPEAKER}`. "
-            "Опциональные разделители: `{ }` (пробел) и `{_}` (нижнее подчёркивание) — "
-            "если после подстановки оказались по краям имени - убираются."
-        )
-        template_input = gr.Textbox(
-            label="Шаблон имени файла",
-            value=current_template,
-            info="Пример: {PITCH_SHIFT}{ }{NAME} - {MODEL}{_}{SPEAKER}",
-        )
-        save_template_btn = gr.Button(
-            "Сохранить настройки именования", variant="primary"
-        )
-        status_text = gr.Textbox(label="Статус", interactive=False)
-
-    save_template_btn.click(
-        fn=update_filename_template,
-        inputs=[template_input],
-        outputs=[status_text],
     )
 
 
@@ -449,5 +424,3 @@ def conversion_tab():
         _batch_conversion_tab()
     with gr.Tab("Модели"):
         models_tab("--offline" in sys.argv)
-    with gr.Tab("Настройки"):
-        _conversion_settings_tab()

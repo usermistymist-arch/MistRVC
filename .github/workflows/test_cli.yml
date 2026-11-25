@@ -50,8 +50,34 @@ jobs:
     - name: Install dependencies
       run: |
         pip install --no-cache-dir uv
-        uv pip install --no-cache-dir torch==2.14.1 torchaudio==2.11.0 --index-url https://download.pytorch.org/whl/cpu -q --system
+        # Версии зеркалят локальную установку (run-MistRVC-installer.bat/.sh) и code_linter.yml
+        uv pip install --no-cache-dir torch==2.11 torchaudio==2.11 torchcodec==0.11 --index-url https://download.pytorch.org/whl/cpu -q --system
         uv pip install --no-cache-dir -r requirements.txt -q --system
+
+    - name: Unit test noise gate
+      run: |
+        python3 - <<'PY'
+        import numpy as np
+        from rvc.inference.infer import _noise_gate
+
+        sr = 40000
+        rng = np.random.default_rng(0)
+        quiet = (rng.standard_normal(sr) * 1e-4).astype(np.float32)   # ~ -80 dBFS
+        tone = (0.2 * np.sin(2 * np.pi * 220 * np.arange(sr) / sr)).astype(np.float32)
+        x = np.concatenate([quiet, tone, quiet])
+        y = _noise_gate(x, sr)
+        assert y.shape == x.shape, "длина изменилась"
+        assert np.isfinite(y).all()
+        m = sr // 2
+        assert np.abs(y[:m]).max() < 1e-6, "шум слева не подавлен"
+        assert np.abs(y[-m:]).max() < 1e-6, "шум справа не подавлен"
+        mid = slice(sr + sr // 4, 2 * sr - sr // 4)
+        assert np.allclose(y[mid], x[mid], atol=1e-6), "полезный сигнал искажён"
+        assert np.abs(_noise_gate(quiet, sr)).max() < 1e-6, "тихий файл не обнулён"
+        loud = (0.2 * rng.standard_normal(3 * sr)).astype(np.float32)
+        assert np.allclose(_noise_gate(loud, sr), loud, atol=1e-6), "громкий файл изменён"
+        print("noise gate OK")
+        PY
 
     - name: Install RVC models
       run: |
@@ -62,13 +88,13 @@ jobs:
         mkdir -p audio
         wget https://huggingface.co/Politrees/audio_for_test/resolve/main/BritishEnglishUKTest5.mp3 -O audio/test.mp3
 
-    - name: Run rvc script
+    - name: Run rvc script (дефолты CLI = настройки UI)
       run: |
-        python3 -m rvc.inference.infer_cli rvc --input_path "audio/test.mp3" --rvc_model "Tsoi" --f0_method "hpa-rmvpe" --f0_min 62 --f0_max 1108 --rvc_pitch -6 --protect 0.4 --index_rate 0.1 --volume_envelope 0.5 --output_format "flac"
+        python3 -m rvc.inference.infer_cli rvc --input_path "audio/test.mp3" --rvc_model "Tsoi"
 
-    - name: Run rvc script (rmvpe, extended F0, без индекса)
+    - name: Run rvc script (rmvpe, узкий F0, питч -6, mp3)
       run: |
-        python3 -m rvc.inference.infer_cli rvc --input_path "audio/test.mp3" --rvc_model "Tsoi" --f0_method "rmvpe" --f0_min 61 --f0_max 2218 --rvc_pitch 0 --protect 0.5 --index_rate 0 --volume_envelope 1 --output_format "wav"
+        python3 -m rvc.inference.infer_cli rvc --input_path "audio/test.mp3" --rvc_model "Tsoi" --f0_method "rmvpe" --f0_min 62 --f0_max 1108 --rvc_pitch -6 --protect 0.5 --index_rate 0 --volume_envelope 1 --output_format "mp3"
 
     - name: Verify output audio
       run: |
@@ -89,7 +115,10 @@ jobs:
         assert files, "Выходных файлов нет"
         for f in files:
             audio, sr = sf.read(f)
-            assert sr == expected_sr, f"{f}: sr={sr}, ожидалось {expected_sr}"
+            if f.lower().endswith(".mp3"):
+                assert sr in (32000, 44100, 48000), f"{f}: sr={sr}, нестандартная частота MP3"
+            else:
+                assert sr == expected_sr, f"{f}: sr={sr}, ожидалось {expected_sr}"
             assert np.isfinite(audio).all(), f"{f}: NaN/Inf в сэмплах"
             sec = len(audio) / sr
             assert 0.7 * src_sec < sec < 1.4 * src_sec, f"{f}: {sec:.1f}s против {src_sec:.1f}s исходника"

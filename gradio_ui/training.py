@@ -69,11 +69,14 @@ AUDIO_EXTENSIONS = (
 )
 
 
-def _section_hint(code1: str):
+def _section_hint(code1: str, code2: str):
     """Центрированная подсказка под заголовком секции обучения."""
     return gr.HTML(
         "<div style='font-size:13px;opacity:0.85;text-align:center;padding:0 4px 8px;'>"
-        f"Если в папке модели есть <code>{code1}</code>, обучение продолжится с него.</div>",
+        f"Если в папке модели есть <code>{code1}</code>, обучение продолжится с него.<br>"
+        "Параметры автоматически подставляются из последней сессии обучения "
+        f"(файл <code>{code2}</code> в папке модели)."
+        "</div>",
     )
 
 
@@ -328,7 +331,8 @@ def _load_training_params(model_name: str) -> dict:
     Возвращает словарь с ключами: sample_rate, segment_len, f0_method,
     include_mutes, normalize, total_epoch, save_every_epoch, batch_size,
     save_to_zip, save_half, d_lr_multiplier, d_grad_max_norm,
-    d_label_smoothing, deterministic, pretrain, pretrain_g, pretrain_d.
+    d_label_smoothing, g_lr_multiplier, g_grad_max_norm, deterministic,
+    pretrain, pretrain_g, pretrain_d.
     Отсутствующие ключи не включаются.
     """
     name = (model_name or "").strip()
@@ -374,6 +378,8 @@ def _load_training_params(model_name: str) -> dict:
         "d_lr_multiplier",
         "d_grad_max_norm",
         "d_label_smoothing",
+        "g_lr_multiplier",
+        "g_grad_max_norm",
         "deterministic",
         "pretrain",
         "pretrain_g",
@@ -403,6 +409,8 @@ def _restore_training_params(
     d_lr_multiplier_current,
     d_grad_max_norm_current,
     d_label_smoothing_current,
+    g_lr_multiplier_current,
+    g_grad_max_norm_current,
     deterministic_current,
 ):
     """Подставляет параметры последнего запуска для существующей модели.
@@ -412,16 +420,16 @@ def _restore_training_params(
     """
     name = (model_name or "").strip()
     if not name:
-        return (gr.update(open=True),) + (gr.update(),) * 17
+        return (gr.update(open=True),) + (gr.update(),) * 19
 
     exp_dir = _exp_dir(name)
     if not os.path.isdir(exp_dir):
-        return (gr.update(open=True),) + (gr.update(),) * 17
+        return (gr.update(open=True),) + (gr.update(),) * 19
 
     params = _load_training_params(name)
     if not params:
         # Модель существует, но обучения ещё не было — сворачиваем аккордеон
-        return (gr.update(open=False),) + (gr.update(),) * 17
+        return (gr.update(open=False),) + (gr.update(),) * 19
 
     # sample_rate: если зафиксирована в config.json — подставляем
     sample_rate = gr.update()
@@ -459,6 +467,8 @@ def _restore_training_params(
         gr.update(value=params.get("d_lr_multiplier", d_lr_multiplier_current)),
         gr.update(value=params.get("d_grad_max_norm", d_grad_max_norm_current)),
         gr.update(value=params.get("d_label_smoothing", d_label_smoothing_current)),
+        gr.update(value=params.get("g_lr_multiplier", g_lr_multiplier_current)),
+        gr.update(value=params.get("g_grad_max_norm", g_grad_max_norm_current)),
         gr.update(value=params.get("deterministic", deterministic_current)),
     ]
     return tuple(updates)
@@ -482,6 +492,8 @@ def _save_training_params(
     d_lr_multiplier,
     d_grad_max_norm,
     d_label_smoothing,
+    g_lr_multiplier,
+    g_grad_max_norm,
     deterministic,
 ):
     """Сохраняет параметры запуска обучения в data/meta.json."""
@@ -504,6 +516,8 @@ def _save_training_params(
         "d_lr_multiplier": float(d_lr_multiplier),
         "d_grad_max_norm": float(d_grad_max_norm),
         "d_label_smoothing": float(d_label_smoothing),
+        "g_lr_multiplier": float(g_lr_multiplier),
+        "g_grad_max_norm": float(g_grad_max_norm),
         "deterministic": bool(deterministic),
     }
 
@@ -644,6 +658,8 @@ def _train_model(
     d_lr_multiplier,
     d_grad_max_norm,
     d_label_smoothing,
+    g_lr_multiplier,
+    g_grad_max_norm,
     seed,
     deterministic,
     probe,
@@ -676,6 +692,8 @@ def _train_model(
         d_lr_multiplier,
         d_grad_max_norm,
         d_label_smoothing,
+        g_lr_multiplier,
+        g_grad_max_norm,
         deterministic,
     )
     if not os.path.isfile(os.path.join(exp_dir, "data", "filelist.txt")):
@@ -732,6 +750,10 @@ def _train_model(
         float(d_grad_max_norm),
         "--d_label_smoothing",
         float(d_label_smoothing),
+        "--g_lr_multiplier",
+        float(g_lr_multiplier),
+        "--g_grad_max_norm",
+        float(g_grad_max_norm),
     )
     if locked_seed is None:
         cmd += ["--seed", str(int(seed) if seed is not None else DEFAULT_SEED)]
@@ -795,7 +817,7 @@ def training_tab():
                 )
 
     with gr.Group():
-        _section_hint("checkpoint.pth")
+        _section_hint("checkpoint.pth", "data/meta.json")
         with gr.Row(equal_height=True):
             total_epoch = gr.Slider(
                 minimum=1, maximum=5000, step=1, value=250, label="Всего эпох"
@@ -825,36 +847,54 @@ def training_tab():
             )
         with gr.Row(equal_height=True):
             save_to_zip = gr.Checkbox(False, label="Собрать ZIP в конце")
-            save_half = gr.Checkbox(False, label="Половинная точность моделей")
+            save_half = gr.Checkbox(True, label="Половинная точность моделей")
         with gr.Accordion("Стабилизация обучения", open=False):
             gr.Markdown(
                 "Настройки для опытных пользователей - изменяйте, только если знаете что делаете."
             )
-            with gr.Row():
-                d_lr_multiplier = gr.Slider(
-                    minimum=0.1,
-                    maximum=1.0,
-                    step=0.05,
-                    value=1.0,
-                    label="Скорость обучения D",
-                    info="Множитель к скорости G: 1.0 = как у G, 0.25 = в 4 раза медленнее.",
-                )
-                d_grad_max_norm = gr.Slider(
-                    minimum=0.0,
-                    maximum=500.0,
-                    step=5.0,
-                    value=0.0,
-                    label="Потолок градиентов D",
-                    info="Потолок суммарной нормы градиентов D. 0.0 = выкл.",
-                )
-                d_label_smoothing = gr.Slider(
-                    minimum=0.0,
-                    maximum=0.2,
-                    step=0.01,
-                    value=0.0,
-                    label="Сглаживание меток D",
-                    info="Цели D: real = 1-s, fake = s - D менее самоуверен. 0.0 = выкл.",
-                )
+            with gr.Group():
+                with gr.Row():
+                    d_lr_multiplier = gr.Slider(
+                        minimum=0.1,
+                        maximum=1.0,
+                        step=0.05,
+                        value=1.0,
+                        label="Скорость обучения D",
+                        info="Множитель к базовой скорости (1e-4): 1.0 = базовая, 0.25 = в 4 раза медленнее.",
+                    )
+                    d_grad_max_norm = gr.Slider(
+                        minimum=0.0,
+                        maximum=500.0,
+                        step=5.0,
+                        value=0.0,
+                        label="Потолок градиентов D",
+                        info="Потолок суммарной нормы градиентов D. 0.0 = выкл.",
+                    )
+                    d_label_smoothing = gr.Slider(
+                        minimum=0.0,
+                        maximum=0.2,
+                        step=0.01,
+                        value=0.0,
+                        label="Сглаживание меток D",
+                        info="Цели D: real = 1-s, fake = s - D менее самоуверен. 0.0 = выкл.",
+                    )
+                with gr.Row():
+                    g_lr_multiplier = gr.Slider(
+                        minimum=0.1,
+                        maximum=1.0,
+                        step=0.05,
+                        value=1.0,
+                        label="Скорость обучения G",
+                        info="Множитель к базовой скорости (1e-4): 1.0 = базовая, 0.25 = в 4 раза медленнее.",
+                    )
+                    g_grad_max_norm = gr.Slider(
+                        minimum=0.0,
+                        maximum=5000.0,
+                        step=50.0,
+                        value=0.0,
+                        label="Потолок градиентов G",
+                        info="Потолок суммарной нормы градиентов G. 0.0 = выкл.",
+                    )
         with gr.Accordion("Воспроизводимость", open=False):
             with gr.Group():
                 with gr.Row(equal_height=True):
@@ -862,7 +902,7 @@ def training_tab():
                         value=DEFAULT_SEED,
                         precision=0,
                         minimum=0,
-                        maximum=2**31 - 1,
+                        maximum=2**32 - 1,
                         label="Сид обучения",
                         info="Зерно случайности: инициализация emb_g, случайные срезы и шум, порядок батчей.",
                     )
@@ -917,6 +957,8 @@ def training_tab():
             d_lr_multiplier,
             d_grad_max_norm,
             d_label_smoothing,
+            g_lr_multiplier,
+            g_grad_max_norm,
             deterministic,
         ],
         outputs=[
@@ -937,6 +979,8 @@ def training_tab():
             d_lr_multiplier,
             d_grad_max_norm,
             d_label_smoothing,
+            g_lr_multiplier,
+            g_grad_max_norm,
             deterministic,
         ],
         api_name=False,
@@ -1005,6 +1049,8 @@ def training_tab():
             d_lr_multiplier,
             d_grad_max_norm,
             d_label_smoothing,
+            g_lr_multiplier,
+            g_grad_max_norm,
             seed,
             deterministic,
             probe,

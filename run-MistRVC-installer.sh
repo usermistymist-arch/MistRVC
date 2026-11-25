@@ -28,6 +28,7 @@ echo "  Python: $PYTHON_VERSION | Device: $TORCH_DEVICE"
 echo "============================================="
 echo
 
+cd "$(dirname "$0")"
 PRINCIPAL="$(pwd)"
 MINICONDA_DIR="$HOME/miniconda3"
 ENV_DIR="$PRINCIPAL/env"
@@ -80,8 +81,13 @@ install_miniconda() {
 }
 
 create_conda_env() {
+    local force_flag="${1:-}"
     echo "Creating Python environment (Python=$PYTHON_VERSION) at $ENV_DIR..."
-    "$CONDA_EXE" create --yes --prefix "$ENV_DIR" "python=$PYTHON_VERSION"
+    if [ -n "$force_flag" ]; then
+        "$CONDA_EXE" create --yes --force --prefix "$ENV_DIR" "python=$PYTHON_VERSION"
+    else
+        "$CONDA_EXE" create --yes --prefix "$ENV_DIR" "python=$PYTHON_VERSION"
+    fi
 }
 
 install_dependencies() {
@@ -125,19 +131,33 @@ install_ffmpeg() {
         sudo pacman -Syu --noconfirm ffmpeg
     elif command -v dnf > /dev/null 2>&1; then
         echo "Installing FFmpeg with dnf..."
-        sudo dnf install -y ffmpeg --allowerasing || install_ffmpeg_flatpak
+        sudo dnf install -y ffmpeg --allowerasing || ffmpeg_manual_error
     else
-        echo "No supported package manager was found. Trying Flatpak..."
-        install_ffmpeg_flatpak
+        ffmpeg_manual_error
+    fi
+
+    if ! command -v ffmpeg > /dev/null 2>&1 || ! command -v ffprobe > /dev/null 2>&1; then
+        ffmpeg_manual_error
     fi
 }
 
-install_ffmpeg_flatpak() {
-    if ! command -v flatpak > /dev/null 2>&1; then
-        echo "Error: Flatpak is not installed. Install FFmpeg manually and run this script again."
-        exit 1
+ffmpeg_manual_error() {
+    echo "Error: could not install FFmpeg automatically."
+    echo "Install ffmpeg and ffprobe manually (must be on PATH), then run this script again."
+    exit 1
+}
+
+verify_installation() {
+    echo "Checking the installation..."
+    "$ENV_DIR/bin/python" -c "import torch, torchaudio, torchcodec, numpy, scipy, sklearn, librosa, soundfile, gradio, faiss, omegaconf, gdown"
+    if "$ENV_DIR/bin/python" -c "import torch; exit(0 if torch.cuda.is_available() else 1)"; then
+        echo "CUDA is available; voice conversion will use the GPU."
+    elif [ "$TORCH_DEVICE" = "cuda" ]; then
+        echo "WARNING: CUDA is unavailable, although an NVIDIA GPU was detected."
+    else
+        echo "The application will run without CUDA (CPU/MPS)."
     fi
-    flatpak install --user -y flathub org.freedesktop.Platform.ffmpeg
+    echo
 }
 
 install_miniconda
@@ -146,11 +166,17 @@ if [ -x "$ENV_DIR/bin/python" ] && "$ENV_DIR/bin/python" --version 2>&1 | grep -
     echo "The Python $PYTHON_VERSION environment at $ENV_DIR already exists. Skipping creation."
     echo
 else
-    create_conda_env
+    if [ -d "$ENV_DIR" ]; then
+        echo "Recreating the environment for Python $PYTHON_VERSION..."
+        create_conda_env --force
+    else
+        create_conda_env
+    fi
 fi
 
 install_dependencies
 install_ffmpeg
+verify_installation
 
 echo
 echo "MistRVC installed successfully!"
