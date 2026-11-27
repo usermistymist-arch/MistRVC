@@ -2,6 +2,11 @@
 
 Скрипты пайплайна читают аргументы из `sys.argv` на уровне модуля,
 поэтому запускаются отдельным процессом — как в официальном RVC WebUI.
+
+Вывод процесса читает фоновый поток: он же печатает эхо в консоль (ячейку
+Colab) и копит последние строки журнала. Отдача журнала в интерфейс —
+отдельный генератор-наблюдатель, поэтому обрыв соединения с браузером
+прекращает только показ в UI, но не задачу, не эхо и не чтение вывода.
 """
 
 import io
@@ -17,15 +22,56 @@ import gradio as gr
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 TAIL_LINES = 200  # Сколько последних строк журнала показывать
+POLL_INTERVAL = 0.3  # Как часто наблюдатель отдаёт снимок журнала в интерфейс
 
 _lock = threading.Lock()
 _process = None
 _process_group_id = None
 _stop_requested = False
+_job_active = False
+_job = None  # Текущая или последняя завершённая задача (_Job)
+
+
+class _Job:
+    """Состояние одной задачи: журнал, живой tqdm-бар и признак завершения.
+
+    Живёт в модуле, а не в генераторе обработчика: переоткрытие страницы
+    подключается к тому же состоянию и видит накопленный журнал.
+    """
+
+    def __init__(self, title: str, prefix: str = ""):
+        self.lock = threading.Lock()
+        self.lines = deque(maxlen=TAIL_LINES)
+        self.lines.append(f"> {title}")
+        if prefix:
+            self.lines.extend(prefix.split("\n"))
+        self.live = ""
+        self.finished = False
+
+    def append(self, text: str) -> None:
+        with self.lock:
+            self.lines.append(text)
+
+    def set_live(self, text: str) -> None:
+        with self.lock:
+            self.live = text
+
+    def snapshot(self) -> str:
+        with self.lock:
+            return "\n".join([*self.lines, self.live] if self.live else self.lines)
+
+    def finish(self, message: str) -> None:
+        with self.lock:
+            if message:
+                self.lines.append(message)
+            self.live = ""
+            self.finished = True
 
 
 def busy() -> bool:
     with _lock:
+        if _job_active:
+            return True
         proc = _process
         group_id = _process_group_id
     if proc is None:
@@ -68,12 +114,15 @@ def _kill_process_tree(proc: subprocess.Popen, sig: int, process_group_id=None) 
 
 def request_stop() -> str:
     """Обработчик кнопки «Остановить». Вызывается с queue=False."""
-    global _process, _stop_requested
+    global _stop_requested
     with _lock:
         _stop_requested = True
         proc = _process
         process_group_id = _process_group_id
+        active = _job_active
     if proc is None:
+        if active:
+            return "Остановка запрошена: задача завершится перед следующей командой."
         return "Нет запущенного процесса."
 
     _kill_process_tree(proc, signal.SIGTERM, process_group_id)
@@ -126,7 +175,8 @@ def _spawn(cmd: list) -> subprocess.Popen:
     else:
         kwargs["start_new_session"] = True
     with _lock:
-        _process = subprocess.Popen(cmd, **kwargs)  # noqa: S603 — команда собрана из констант
+        # Команда собрана из констант, не из пользовательского ввода.
+        _process = subprocess.Popen(cmd, **kwargs)  # noqa: S603
         _process_group_id = _process.pid if os.name != "nt" else None
         # Текстовая обёртка без трансляции \r: это живой прогресс tqdm, а не конец строки.
         _process.stdout = io.TextIOWrapper(
@@ -135,34 +185,25 @@ def _spawn(cmd: list) -> subprocess.Popen:
         return _process
 
 
-def run_job(title: str, commands: list, prefix: str = ""):
-    """Генератор для кнопки запуска: выполняет команды по очереди, отдаёт журнал."""
-    global _process, _process_group_id, _stop_requested
-    if busy():
-        raise gr.Error("Другая задача ещё выполняется — дождитесь её или остановите.")
+def _run_commands(job: _Job, commands: list) -> None:
+    """Тело задачи в фоновом потоке: команды по очереди, чтение вывода, эхо.
 
-    if commands and isinstance(commands[0], str):
-        commands = [commands]
-    with _lock:
-        _stop_requested = False
-
-    lines = deque(maxlen=TAIL_LINES)
-    lines.append(f"> {title}")
-    if prefix:
-        lines.extend(prefix.split("\n"))
-    yield "\n".join(lines)
-
+    Не зависит от соединения с браузером: даже если все наблюдатели Gradio
+    отключились, поток продолжает читать вывод (иначе pipe переполнился бы
+    и обучающий процесс завис на записи) и печатать его в консоль.
+    """
+    global _process, _process_group_id, _job_active
     try:
         for cmd in commands:
             with _lock:
                 if _stop_requested:
-                    break
+                    job.finish("[!] Остановлено пользователем.")
+                    return
             # Аргументы могли дописаться в cmd после command(): приводим к str,
             # иначе join и Popen падают на числах.
             cmd = [str(part) for part in cmd]
-            lines.append(f"$ {' '.join(cmd)}")
+            job.append(f"$ {' '.join(cmd)}")
             proc = _spawn(cmd)
-            last_yield = 0.0
             buffer = ""
             live = ""
             while True:
@@ -174,61 +215,103 @@ def run_job(title: str, commands: list, prefix: str = ""):
                         text = buffer.strip()
                         buffer = ""
                         if chunk == "\n":
-                            # Jupyter/Colab не перерисовывает \r в консольной выдаче:
-                            # там печатаем завершённый tqdm-бар один раз, по LF.
-                            # В обычном TTY построчно завершаем уже обновляемый бар.
+                            # Colab/Jupyter перерисовывают \r в выдаче ячейки,
+                            # поэтому живой бар печатается и там: завершённую
+                            # строку выводим поверх бара через \r + перевод строки.
                             console_text = text or live
                             if console_text:
-                                lines.append(console_text)
-                                if live and sys.stdout.isatty():
-                                    print(flush=True)
+                                job.append(console_text)
+                                if live:
+                                    print("\r" + console_text, flush=True)
                                 else:
                                     print(console_text, flush=True)
                             live = ""
-                        elif chunk == "\r":
-                            if text:
-                                live = text
-                                if sys.stdout.isatty():
-                                    print("\r" + live, end="", flush=True)
-                        elif text:
+                            job.set_live("")
+                        elif text:  # \r — живое обновление tqdm-бара
                             live = text
+                            job.set_live(live)
+                            print("\r" + live, end="", flush=True)
                     else:
                         buffer += chunk
                 elif proc.poll() is not None:
                     break
                 else:
                     time.sleep(0.05)
-                if time.monotonic() - last_yield >= 0.3:
-                    last_yield = time.monotonic()
-                    yield "\n".join([*lines, live] if live else lines)
             tail = buffer.strip()
             if tail:
                 print(tail, flush=True)
-                lines.append(tail)
+                job.append(tail)
             if live:
-                if sys.stdout.isatty():
-                    print(flush=True)
-                else:
-                    print(live, flush=True)
-                lines.append(live)
+                print("\r" + live, flush=True)
+                job.append(live)
+                job.set_live("")
             proc.wait()
             with _lock:
                 stopped = _stop_requested
             if stopped:
-                lines.append("[!] Остановлено пользователем.")
-                yield "\n".join(lines)
+                job.finish("[!] Остановлено пользователем.")
                 return
             if proc.returncode != 0:
-                lines.append(
-                    f"[X] Ошибка (код {proc.returncode}). Смотрите журнал выше."
-                )
-                yield "\n".join(lines)
+                job.finish(f"[X] Ошибка (код {proc.returncode}). Смотрите журнал выше.")
                 return
+        job.finish("Готово.")
+    except Exception as error:  # noqa: BLE001 — сбой задачи пишем в журнал, не роняем UI
+        message = f"[X] Внутренняя ошибка задачи: {error}"
+        print(message, flush=True)
+        job.finish(message)
     finally:
-        # Флаг не сбрасываем: следующий запуск выставит его сам, читателей между запусками нет.
+        # Сбрасываем только по реальному завершению задачи, а не по обрыву
+        # соединения: иначе osиротевший процесс стал бы неуправляемым.
         with _lock:
+            _job_active = False
             _process = None
             _process_group_id = None
 
-    lines.append("Готово.")
-    yield "\n".join(lines)
+
+def start_job(title: str, commands: list, prefix: str = "") -> _Job:
+    """Запускает задачу в фоновом потоке и сразу возвращает её состояние."""
+    global _job, _stop_requested, _job_active
+    if commands and isinstance(commands[0], str):
+        commands = [commands]
+    with _lock:
+        if _job_active:
+            raise gr.Error(
+                "Другая задача ещё выполняется — дождитесь её или остановите."
+            )
+        _stop_requested = False
+        _job_active = True
+        _job = _Job(title, prefix)
+        job = _job
+    threading.Thread(
+        target=_run_commands, args=(job, commands), daemon=True, name="mistrvc-job"
+    ).start()
+    return job
+
+
+def watch_job(job: _Job | None = None):
+    """Наблюдатель: отдаёт снимок журнала каждые 0.3 с до завершения задачи.
+
+    Без аргумента подключается к текущей/последней задаче. Обрыв соединения
+    закрывает только этот генератор; сама задача продолжает работать.
+    """
+    if job is None:
+        with _lock:
+            job = _job
+    if job is None:
+        yield ""
+        return
+    while True:
+        yield job.snapshot()
+        if job.finished:
+            return
+        time.sleep(POLL_INTERVAL)
+
+
+def run_job(title: str, commands: list, prefix: str = ""):
+    """Генератор для кнопки запуска: стартует задачу и отдаёт её журнал.
+
+    Совместим со старым вызовом `yield from run_job(...)`, но выполнение
+    теперь живёт в фоновом потоке (start_job), а не в этом генераторе.
+    """
+    job = start_job(title, commands, prefix)
+    yield from watch_job(job)

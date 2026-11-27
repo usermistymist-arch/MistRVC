@@ -40,6 +40,7 @@ from gradio_ui.common import (
     refresh_models,
 )
 from gradio_ui.inference import conversion_tab
+from gradio_ui.jobs import watch_job
 from gradio_ui.tools import tools_tab
 from gradio_ui.training import training_tab
 
@@ -132,9 +133,10 @@ with gr.Blocks(
     conversion_tab_ui.select(refresh_models, outputs=model_dropdowns(), api_name=False)
 
     # Обучение только при наличии CUDA
+    training_log = None
     if torch.cuda.is_available():
         with gr.Tab("Обучение"):
-            training_tab()
+            training_log = training_tab()
 
     with gr.Tab(uvr_title):
         if uvr_ui is not None:
@@ -152,6 +154,16 @@ with gr.Blocks(
         from gradio_ui.settings import settings_tab
 
         settings_tab()
+
+    # При открытии/переоткрытии страницы подключаем журнал к идущей задаче:
+    # вывод процесса читает фоновый поток и переживает обрыв соединения.
+    if training_log is not None:
+        MistRVC.load(
+            watch_job,
+            outputs=training_log,
+            concurrency_limit=None,
+            api_name=False,
+        )
 
 
 def launch_gradio(server_name: str, server_port: int) -> None:

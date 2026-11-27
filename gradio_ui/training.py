@@ -22,7 +22,7 @@ from assets.model_installer import (
     ensure_pretrains,
 )
 from assets.pretrains import NO_PRETRAIN, default_pretrain, pretrain_choices
-from gradio_ui.jobs import command, request_stop, run_job
+from gradio_ui.jobs import command, request_stop, run_job, watch_job
 from rvc.training.utils.probe import MODE_NAMES, locked_probe, read_meta, update_meta
 
 SAMPLE_RATES = [32000, 40000, 48000]
@@ -927,8 +927,9 @@ def training_tab():
                         info=PROBE_SIZE_INFO,
                     )
         with gr.Row(equal_height=True):
-            train_btn = gr.Button("Запустить обучение", variant="primary")
-            stop_btn = gr.Button("Завершить процесс", variant="stop")
+            train_btn = gr.Button("Запустить обучение", variant="primary", scale=2)
+            attach_btn = gr.Button("Переподключить журнал", scale=1)
+            stop_btn = gr.Button("Завершить процесс", variant="stop", scale=1)
         stop_status = gr.Markdown("")
 
     with gr.Group():
@@ -1069,3 +1070,18 @@ def training_tab():
         api_name=False,
     )
     stop_btn.click(request_stop, outputs=stop_status, queue=False, api_name=False)
+    # Переподключение к журналу идущей (или последней) задачи: обрыв соединения
+    # убивает только показ, сама задача живёт в фоновом потоке (jobs.py).
+    attach_btn.click(
+        watch_job,
+        outputs=log,
+        concurrency_limit=None,
+        api_name=False,
+    ).then(_seed_state, inputs=model_name, outputs=seed, api_name=False).then(
+        _probe_state,
+        inputs=model_name,
+        outputs=[probe, probe_size],
+        api_name=False,
+    )
+
+    return log
