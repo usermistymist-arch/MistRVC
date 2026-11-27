@@ -49,7 +49,12 @@ def save_checkpoint(net_g, optim_g, net_d, optim_d, epoch, checkpoint_path):
         ".weight_g",
     )
 
-    torch.save(checkpoint_data, checkpoint_path)
+    # Атомарная запись: сначала во временный файл, затем замена. Краш или
+    # остановка посреди записи не оставит обрезанный checkpoint.pth — старый
+    # файл переживёт сбой, и продолжение обучения не сломается.
+    tmp_path = checkpoint_path + ".tmp"
+    torch.save(checkpoint_data, tmp_path)
+    os.replace(tmp_path, checkpoint_path)
     print(f"▸ Сохранён чекпоинт: '{os.path.basename(checkpoint_path)}'", flush=True)
 
 

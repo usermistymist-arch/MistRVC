@@ -558,6 +558,12 @@ def run(hps, rank, n_gpus, device, device_id):
                         "model"
                     ]
                 )
+            # Нулевой чекпоинт сразу после готовности весов (претрейн или
+            # случайная инициализация): краш до первого периодического
+            # сохранения больше не теряет старт — продолжение подхватит эпоху 0.
+            if rank == 0:
+                print("Сохранение нулевого чекпоинта (эпоха 0)...", flush=True)
+                save_checkpoint(net_g, optim_g, net_d, optim_d, 0, checkpoint_path)
 
         # Множители скорости задаются на каждый запуск. Чекпоинт приносит свои
         # initial_lr, и без этого смена множителя при продолжении игнорировалась бы:
@@ -577,11 +583,12 @@ def run(hps, rank, n_gpus, device, device_id):
             optim_d, gamma=hps.train.lr_decay, last_epoch=epoch_str - 2
         )
 
-        if epoch_str > 1:
-            steps_done = epoch_str - 1
-            for optim in (optim_g, optim_d):
-                for group in optim.param_groups:
-                    group["lr"] = group["initial_lr"] * hps.train.lr_decay**steps_done
+        # Пересчёт lr от initial_lr: при старте с нуля decay^0 = 1 (без изменений),
+        # при продолжении — учитывает и пройденные эпохи, и новые множители.
+        steps_done = epoch_str - 1
+        for optim in (optim_g, optim_d):
+            for group in optim.param_groups:
+                group["lr"] = group["initial_lr"] * hps.train.lr_decay**steps_done
 
         # Проверка: не превышает ли загруженная эпоха целевую
         if epoch_str > hps.total_epoch:

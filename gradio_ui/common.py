@@ -114,6 +114,22 @@ def list_loaded_audio() -> "dict[str, str]":
     return found
 
 
+def refresh_loaded_audio() -> dict:
+    """Обновление списка аудио для одиночного дропдауна (возвращаем не список)."""
+    return gr.update(choices=list(list_loaded_audio().keys()))
+
+
+def loaded_audio_select() -> gr.Dropdown:
+    """Список ранее загруженного аудио; обновляется при раскрытии панели."""
+    return gr.Dropdown(
+        label="Ранее загруженные",
+        info="Аудиофайлы, ранее загруженные через интерфейс.",
+        choices=list(list_loaded_audio().keys()),
+        value=None,
+        allow_custom_value=False,
+    )
+
+
 def conversion_settings():
     """Настройки конвертации."""
     with gr.Accordion("Настройки конвертации", open=True):

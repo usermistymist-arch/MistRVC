@@ -12,9 +12,11 @@ from gradio_ui.common import (
     RVC_OUTPUT_DIR,
     conversion_settings,
     list_loaded_audio,
+    loaded_audio_select,
     model_select,
     pitch_slider,
     process_file_upload,
+    refresh_loaded_audio,
     swap_buttons,
     swap_visibility,
 )
@@ -245,13 +247,7 @@ def _single_conversion_tab():
                     label="Путь к файлу:",
                     info="Введите полный путь к файлу.",
                 )
-                loaded_audio_dropdown = gr.Dropdown(
-                    label="Ранее загруженные",
-                    info="Аудиофайлы, ранее загруженные в этой сессии.",
-                    choices=list(list_loaded_audio().keys()),
-                    value=None,
-                    allow_custom_value=False,
-                )
+                loaded_audio_dropdown = loaded_audio_select()
 
             with gr.Column():
                 show_upload_button = gr.Button(
@@ -311,6 +307,10 @@ def _single_conversion_tab():
     show_enter_button.click(
         swap_visibility,
         outputs=[enter_local_file, upload_file, song_input, local_file],
+        api_name=False,
+    ).then(
+        refresh_loaded_audio,
+        outputs=[loaded_audio_dropdown],
         api_name=False,
     )
     show_upload_button.click(
